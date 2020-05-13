@@ -1,0 +1,12 @@
+###############
+#    folder   #
+###############
+/**/DROP/
+/**/TEMP/
+/**/packages/
+/**/bin/
+/**/obj/
+PinchotDocumentation/_site
+PinchotDocumentation/_site_pdf
+PinchotDocumentation/log.txt
+JoeScan.Pinchot.xml

@@ -1,0 +1,9 @@
+
+- name: Introduction
+  href: DotNet_intro.md
+- name: Configure and Connect
+  href: 00configure_and_connect_DotNet.md
+- name: Basic Scanning
+  href: 01basic_scanning_DotNet.md
+- name: Advanced Scanning
+  href: 02advanced_scanning_DotNet.md
