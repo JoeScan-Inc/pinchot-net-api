@@ -4,10 +4,11 @@ scan heads. This API allows users to develop software to run on a desktop
 computer and control scan heads that are connected to the same network.
 If writing software to control classic JoeScan products such as the JS-20 or
 JS-25, please download the supporting software
-[here](help.joescan.com/display/ds/downloads).
+[here](http://help.joescan.com/display/ds/downloads).
 Note that this is the open source release of the Joescan Pinchot API and will
 need to be manually built and compiled by the end user. The official
-precompiled version of this API can be found [here](api.joescan.com/release).
+precompiled version of this API is available as a NuGet package at nuget.org.
+Alternatively DLL's can be found [here](http://api.joescan.com/release).
 
 ## Build Dependencies
 In order to build the API and software examples in Windows 10, the following
