@@ -102,6 +102,10 @@ namespace JoeScan.Pinchot
             var cosYaw = tr.CosYaw;
             var shiftX = tr.ShiftX;
             var shiftY = tr.ShiftY;
+            var xXCoefficient = cosYaw * cosRoll / 1000;
+            var xYCoefficient = sinRoll / 1000;
+            var yXCoefficient = cosYaw * sinRoll / 1000;
+            var yYCoefficient = cosRoll / 1000;
             foreach (DataType dt in dataTypes)
             {
                 for (var fragmentNumber = 0; fragmentNumber < fragmentsCount; fragmentNumber++)
@@ -141,9 +145,9 @@ namespace JoeScan.Pinchot
                                     {
                                         validPointCount++;
                                         rawPointsSpan[destPos].X =
-                                            (xraw / 1000.0) * cosYaw * cosRoll - (yraw / 1000.0) * sinRoll + shiftX;
+                                            xraw * xXCoefficient - yraw * xYCoefficient + shiftX;
                                         rawPointsSpan[destPos].Y =
-                                            (xraw / 1000.0) * cosYaw * sinRoll + (yraw / 1000.0) * cosRoll + shiftY;
+                                            xraw * yXCoefficient + yraw * yYCoefficient + shiftY;
                                     }
 
                                     sourcePos += 4;
@@ -172,6 +176,7 @@ namespace JoeScan.Pinchot
 
                                 break;
                             case DataType.IM:
+                                //TODO:: Adapt to use SP type
                                 if (fragmentNumber == fragmentsCount - 1)
                                 {
                                     if (cameraCoords == null)
@@ -184,23 +189,18 @@ namespace JoeScan.Pinchot
                                         int rowPixel = BitConverter.ToInt16(currentFragment.Raw, sourcePos);
                                         sourcePos += 2;
                                         int brightness = BitConverter.ToInt16(currentFragment.Raw, sourcePos);
+                                        sourcePos += 2;
                                         if (brightness < 0x8000)
                                         {
                                             brightness = brightness / 7;
                                         }
                                         else
                                         {
+                                            rowPixel = Globals.ProfileDataInvalidSubpixel;
                                             brightness = 0;
                                         }
-
-                                        sourcePos += 2;
-
-                                        if (rowPixel != Globals.ProfileDataInvalidSubpixel)
-                                        {
-                                            cameraCoords[i] = new Point2D(rowPixel, i, brightness);
-                                        }
+                                        cameraCoords[i] = new Point2D(rowPixel, i, brightness);
                                     }
-
                                     break;
                                 }
 

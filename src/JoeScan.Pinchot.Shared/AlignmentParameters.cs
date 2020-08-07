@@ -101,8 +101,24 @@ namespace JoeScan.Pinchot
         /// <param name="shiftX">The shift along the X axis in the mill coordinate system in inches.</param>
         /// <param name="shiftY">The shift along the Y axis in the mill coordinate system in inches.</param>
         /// <param name="orientation">The <see cref="ScanHeadOrientation"/>.</param>
+        /// <exception cref="ArgumentException">
+        /// One or more arguments are <see cref="Double.NaN"/><br/>
+        /// -or-<br/>
+        /// One or more arguments are <see cref="Double.NegativeInfinity"/> or <see cref="Double.PositiveInfinity"/>
+        /// </exception>
         internal AlignmentParameters(double roll, double shiftX, double shiftY, ScanHeadOrientation orientation)
         {
+            if (Double.IsNaN(roll) || Double.IsNaN(shiftX) || Double.IsNaN(shiftY))
+            {
+                throw new ArgumentException("One or more arguments are Double.NaN.");
+            }
+
+            if (Double.IsInfinity(roll) || Double.IsInfinity(shiftX) || Double.IsInfinity(shiftY))
+            {
+                throw new ArgumentException(
+                    "One or more arguments are Double.NegativeInfinity or Double.PositiveInfinity.");
+            }
+
             Roll = roll;
             ShiftX = shiftX;
             ShiftY = shiftY;

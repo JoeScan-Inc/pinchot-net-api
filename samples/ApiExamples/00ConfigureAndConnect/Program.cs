@@ -131,7 +131,7 @@ namespace _00ConfigureAndConnect
                 Console.WriteLine($"{temperature.Key}: {temperature.Value} Degrees C");
             }
 
-            Console.WriteLine($"{nameof(status.MaxScanRate)}: {status.MaxScanRate}Hz");
+            Console.WriteLine($"{nameof(_scanSystem.GetMaxScanRate)}: {_scanSystem.GetMaxScanRate()}Hz");
             Console.WriteLine($"{nameof(status.ProfilesSentCount)}: {status.ProfilesSentCount}");
         }
     }

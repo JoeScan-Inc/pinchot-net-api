@@ -1,13 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netcoreapp3.0;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>netcoreapp3.1;netstandard2.0</TargetFrameworks>
     <DocumentationFile>JoeScan.Pinchot.xml</DocumentationFile>
     <NoWarn>1701;1702;CA1303</NoWarn>
     <Owners>JoeScan Inc.</Owners>
     <Authors>JoeScan Inc.</Authors>
     <PackageId>JoeScan.Pinchot</PackageId>
-    <PackageProjectUrl>https://github.com/JoeScan-Inc/PinchotApi</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/JoeScan-Inc/pinchot-net-api</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/JoeScan-Inc/pinchot-net-api</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <Description>
       Pinchot is the API for interfacing with JS-50 model scan heads. For Pinchot documentation and examples, and for the JCam API for JS-25 model scan heads, please see api.joescan.com.
     </Description>
@@ -16,7 +18,7 @@
     <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIconUrl>http://api.joescan.com/js50net/images/myfavicon.ico</PackageIconUrl>
-    <PackageIcon>myfavicon.ico</PackageIcon>
+    <PackageIcon>JoeScanDeveloperIcon128.png</PackageIcon>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
@@ -35,7 +37,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
     <PackageReference Include="RestSharp" Version="106.10.1" />
     <PackageReference Include="System.Memory" Version="4.5.3" />
-    <None Include="..\..\doc\images\myfavicon.ico" Pack="true" PackagePath="\"/>
+    <None Include="JoeScanDeveloperIcon128.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

@@ -11,6 +11,14 @@ namespace JoeScan.Pinchot
     internal static class Globals
     {
         /// <summary>
+        /// The max scan rate
+        /// </summary>
+#if PINCHOT_NO_MAX_SCAN_RATE
+        public const int MaxScanRate = 10000;
+#else
+        public const int MaxScanRate = 3200;
+#endif
+        /// <summary>
         /// The raw profile data length.
         /// </summary>
         public const int RawProfileDataLength = 1456;

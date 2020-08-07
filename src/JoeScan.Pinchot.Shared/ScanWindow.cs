@@ -43,6 +43,10 @@ namespace JoeScan.Pinchot
         /// <returns>The created <see cref="ScanWindow"/>.</returns>
         /// <seealso cref="ScanHead.SetWindow(ScanWindow)"/>
         /// <exception cref="ArgumentException">
+        /// One or more arguments are <see cref="Double.NaN"/><br/>
+        /// -or-<br/>
+        /// One or more arguments are <see cref="Double.NegativeInfinity"/> or <see cref="Double.PositiveInfinity"/><br/>
+        /// -or-<br/>
         /// <paramref name="windowTop"/> is less than or equal to <paramref name="windowBottom"/><br/>
         /// -or-<br/>
         /// <paramref name="windowRight"/> is less than or equal to <paramref name="windowLeft"/> 
@@ -50,6 +54,23 @@ namespace JoeScan.Pinchot
         public static ScanWindow CreateScanWindowRectangular(double windowTop, double windowBottom, double windowLeft,
             double windowRight)
         {
+            if (Double.IsNaN(windowTop) ||
+                Double.IsNaN(windowBottom) ||
+                Double.IsNaN(windowLeft) ||
+                Double.IsNaN(windowRight))
+            {
+                throw new ArgumentException("One or more arguments are Double.NaN.");
+            }
+
+            if (Double.IsInfinity(windowTop) ||
+                Double.IsInfinity(windowBottom) ||
+                Double.IsInfinity(windowLeft) ||
+                Double.IsInfinity(windowRight))
+            {
+                throw new ArgumentException(
+                    "One or more arguments are Double.NegativeInfinity or Double.PositiveInfinity.");
+            }
+
             if (windowTop <= windowBottom)
             {
                 throw new ArgumentException($"{nameof(windowTop)} must be greater than {nameof(windowBottom)}");

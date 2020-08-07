@@ -223,17 +223,17 @@ namespace JoeScan.Pinchot
         /// set <paramref name="minTimeUs"/>, <paramref name="defaultTimeUs"/> and <paramref name="maxTimeUs"/> to the same value.
         /// </summary>
         /// <param name="minTimeUs">Lower bound for the auto-exposure algorithm. Value in microseconds.
-        /// Must be smaller than or equal to <paramref name="defaultTimeUs"/>. Allowed Range 10μs - 650,000μs. Default: 100μs</param>
+        /// Must be smaller than or equal to <paramref name="defaultTimeUs"/>. Allowed Range 15μs - 650,000μs. Default: 100μs</param>
         /// <param name="defaultTimeUs">Starting value for the auto-exposure algorithm. Value in microseconds.
-        /// Must be smaller than or equal to <paramref name="maxTimeUs"/>. Allowed Range 10μs - 650,000μs. Default: 500μs</param>
+        /// Must be smaller than or equal to <paramref name="maxTimeUs"/>. Allowed Range 15μs - 650,000μs. Default: 500μs</param>
         /// <param name="maxTimeUs">Upper bound for the auto-exposure algorithm. Value in microseconds.
-        /// Must be greater than <paramref name="defaultTimeUs"/>. Allowed Range 10μs - 650,000μs. Default: 1000μs</param>
+        /// Must be greater than <paramref name="defaultTimeUs"/>. Allowed Range 15μs - 650,000μs. Default: 1000μs</param>
         /// <exception cref="System.ArgumentOutOfRangeException">
-        /// <paramref name="minTimeUs"/> out of range (10μs - 650,000μs)<br/>
+        /// <paramref name="minTimeUs"/> out of range (15μs - 650,000μs)<br/>
         /// -or-<br/>
-        /// <paramref name="defaultTimeUs"/> out of range (10μs - 650,000μs)<br/>
+        /// <paramref name="defaultTimeUs"/> out of range (15μs - 650,000μs)<br/>
         /// -or-<br/>
-        /// <paramref name="maxTimeUs"/> out of range (10μs - 650,000μs)
+        /// <paramref name="maxTimeUs"/> out of range (15μs - 650,000μs)
         /// </exception>
         /// <exception cref="System.ArgumentException">
         /// <paramref name="minTimeUs"/> must be less or equal to <paramref name="defaultTimeUs"/><br/>
@@ -243,20 +243,22 @@ namespace JoeScan.Pinchot
         public void SetLaserOnTime(double minTimeUs, double defaultTimeUs, double maxTimeUs)
         {
             // TODO: what are the limits on the hardware? Using JS-25 values here for now
-            if (minTimeUs < 10 || minTimeUs > 650000)
+            if (minTimeUs < 15 || minTimeUs > 650000)
             {
-                throw new ArgumentOutOfRangeException(nameof(minTimeUs), "MinLaserOn out of range (10μs - 650,000μs)");
+                throw new ArgumentOutOfRangeException(nameof(minTimeUs),
+                    "MinLaserOn out of range (15μs - 650,000μs)");
             }
 
-            if (defaultTimeUs < 10 || defaultTimeUs > 650000)
+            if (defaultTimeUs < 15 || defaultTimeUs > 650000)
             {
                 throw new ArgumentOutOfRangeException(nameof(defaultTimeUs),
-                    "DefaultLaserOn out of range (10μs - 650,000μs)");
+                    "DefaultLaserOn out of range (15μs - 650,000μs)");
             }
 
-            if (maxTimeUs < 10 || maxTimeUs > 650000)
+            if (maxTimeUs < 15 || maxTimeUs > 650000)
             {
-                throw new ArgumentOutOfRangeException(nameof(maxTimeUs), "MaxLaserOn out of range (10μs - 650,000μs)");
+                throw new ArgumentOutOfRangeException(nameof(maxTimeUs),
+                    "MaxLaserOn out of range (15μs - 650,000μs)");
             }
 
             if (minTimeUs > defaultTimeUs)
@@ -279,17 +281,17 @@ namespace JoeScan.Pinchot
         /// set <paramref name="minTimeUs"/>, <paramref name="defaultTimeUs"/> and <paramref name="maxTimeUs"/> to the same value.
         /// </summary>
         /// <param name="minTimeUs">Lower bound for the image mode auto-exposure algorithm. Value in microseconds.
-        /// Must be smaller than or equal to <paramref name="defaultTimeUs"/>. Allowed Range 10μs - 6,000,000μs. Default: 10,000μs</param>
+        /// Must be smaller than or equal to <paramref name="defaultTimeUs"/>. Allowed Range 15μs - 2,000,000μs. Default: 10,000μs</param>
         /// <param name="defaultTimeUs">Starting value for the image mode auto-exposure algorithm. Value in microseconds.
-        /// Must be smaller than or equal to <paramref name="maxTimeUs"/>. Allowed Range 10μs - 6,000,000μs. Default: 500,000μs</param>
+        /// Must be smaller than or equal to <paramref name="maxTimeUs"/>. Allowed Range 15μs - 2,000,000μs. Default: 500,000μs</param>
         /// <param name="maxTimeUs">Upper bound for the image mode auto-exposure algorithm. Value in microseconds.
-        /// Must be greater than <paramref name="defaultTimeUs"/>. Allowed Range 10μs - 6,000,000μs. Default: 1,000,000μs</param>
+        /// Must be greater than <paramref name="defaultTimeUs"/>. Allowed Range 15μs - 2,000,000μs. Default: 1,000,000μs</param>
         /// <exception cref="System.ArgumentOutOfRangeException">
-        /// <paramref name="minTimeUs"/> out of range (10μs - 6,000,000μs)<br/>
+        /// <paramref name="minTimeUs"/> out of range (15μs - 2,000,000μs)<br/>
         /// -or-<br/>
-        /// <paramref name="defaultTimeUs"/> out of range (10μs - 6,000,000μs)<br/>
+        /// <paramref name="defaultTimeUs"/> out of range (15μs - 2,000,000μs)<br/>
         /// -or-<br/>
-        /// <paramref name="maxTimeUs"/> out of range (10μs - 6,000,000μs)
+        /// <paramref name="maxTimeUs"/> out of range (15μs - 2,000,000μs)
         /// </exception>
         /// <exception cref="System.ArgumentException">
         /// <paramref name="minTimeUs"/> must be less or equal to <paramref name="defaultTimeUs"/><br/>
@@ -298,22 +300,22 @@ namespace JoeScan.Pinchot
         /// </exception>
         public void SetCameraExposureTime(double minTimeUs, double defaultTimeUs, double maxTimeUs)
         {
-            if (minTimeUs < 10 || minTimeUs > 6000000)
+            if (minTimeUs < 15 || minTimeUs > 2000000)
             {
                 throw new ArgumentOutOfRangeException(nameof(minTimeUs),
-                    "MinExposure out of range (10μs - 6,000,000μs)");
+                    "MinExposure out of range (15μs - 2,000,000μs)");
             }
 
-            if (defaultTimeUs < 10 || defaultTimeUs > 6000000)
+            if (defaultTimeUs < 15 || defaultTimeUs > 2000000)
             {
                 throw new ArgumentOutOfRangeException(nameof(defaultTimeUs),
-                    "DefaultExposure out of range (10μs - 6,000,000μs)");
+                    "DefaultExposure out of range (15μs - 2,000,000μs)");
             }
 
-            if (maxTimeUs < 10 || maxTimeUs > 6000000)
+            if (maxTimeUs < 15 || maxTimeUs > 2000000)
             {
                 throw new ArgumentOutOfRangeException(nameof(maxTimeUs),
-                    "MaxExposure out of range (10μs - 6,000,000μs)");
+                    "MaxExposure out of range (15μs - 2,000,000μs)");
             }
 
             if (minTimeUs > defaultTimeUs)

@@ -8,6 +8,7 @@ namespace JoeScan.Pinchot
     internal enum ScanPacketType : byte
     {
         Invalid = 0,
+
         // Connect = 1, OBSOLETE
         StartScanning = 2,
         Status = 3,

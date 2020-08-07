@@ -530,7 +530,7 @@ namespace JoeScan.Pinchot
 
             if (!enableLasers)
             {
-                Configuration.SetLaserOnTime(10.0, 10.0, 10.0);
+                Configuration.SetLaserOnTime(15.0, 15.0, 15.0);
             }
             else
             {
@@ -582,6 +582,8 @@ namespace JoeScan.Pinchot
                         LaserOnTime = profile.LaserOnTime,
                         ExposureTime = profile.ExposureTime,
                         Data = profile.Image,
+                        Width = Globals.CameraImageDataMaxWidth,
+                        Height = Globals.CameraImageDataMaxHeight,
                         Timestamp = profile.Timestamp
                     };
 
@@ -610,7 +612,7 @@ namespace JoeScan.Pinchot
             var response = restClient.Execute(request);
             if (!response.IsSuccessful)
             {
-                throw new Exception("REST request was unsuccessful.");
+                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
             }
 
             return JsonConvert.DeserializeObject<ScanHeadTemperatureSensors>(response.Content);
@@ -625,7 +627,7 @@ namespace JoeScan.Pinchot
             var response = restClient.Execute(request);
             if (!response.IsSuccessful)
             {
-                throw new Exception("REST request was unsuccessful.");
+                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
             }
 
             return JsonConvert.DeserializeObject<ScanHeadPowerSensors>(response.Content);
@@ -640,7 +642,7 @@ namespace JoeScan.Pinchot
             var response = restClient.Execute(request);
             if (!response.IsSuccessful)
             {
-                throw new Exception("REST request was unsuccessful.");
+                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
             }
 
             return JsonConvert.DeserializeObject<ScanHeadChannelAlignment>(response.Content);
@@ -655,7 +657,7 @@ namespace JoeScan.Pinchot
             var response = restClient.Execute(request);
             if (!response.IsSuccessful)
             {
-                throw new Exception("REST request was unsuccessful.");
+                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
             }
 
             return JsonConvert.DeserializeObject<ScanHeadLaserCameraExposureTimes>(response.Content);
@@ -672,7 +674,7 @@ namespace JoeScan.Pinchot
             var response = restClient.Execute(request);
             if (!response.IsSuccessful)
             {
-                throw new Exception("REST request was unsuccessful.");
+                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
             }
         }
 

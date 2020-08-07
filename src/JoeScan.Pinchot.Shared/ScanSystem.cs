@@ -378,18 +378,28 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// <see cref="IsScanning"/> is `true`.
         /// </exception>
+        /// <exception cref="ArgumentException">
+        /// Requested scan rate <paramref name="rate"/> is greater than <see cref="MaxScanRate"/>.
+        /// </exception>
         public void StartScanning(double rate, DataFormat dataFormat)
         {
             if (!IsConnected)
             {
-                var msg = "Attempting to start scanning on an unconnected scan head.";
+                var msg = "Attempting to start scanning when not connected.";
                 throw new Exception(msg);
             }
 
             if (IsScanning)
             {
-                var msg = "Attempting to start scanning on an already scanning scan head.";
+                var msg = "Attempting to start scanning while already scanning.";
                 throw new Exception(msg);
+            }
+
+            if (rate > GetMaxScanRate())
+            {
+                var msg =
+                    $"Requested scan rate of {rate}Hz is greater than the maximum allowed of {GetMaxScanRate()}Hz";
+                throw new ArgumentException(msg);
             }
 
             foreach (var scanHead in ScanHeads)
@@ -425,6 +435,41 @@ namespace JoeScan.Pinchot
             }
 
             IsScanning = false;
+        }
+
+        /// <summary>
+        /// Gets the maximum scan rate allowed by the <see cref="ScanSystem"/> in Hz.
+        /// </summary>
+        /// <returns>The maximum scan rate allowed by the <see cref="ScanSystem"/> in Hz.</returns>
+        /// <exception cref="System.Exception">
+        /// <see cref="IsConnected"/> is `false`.
+        /// </exception>
+        public double GetMaxScanRate()
+        {
+            if (!IsConnected)
+            {
+                var msg = "Attempting to get max scan rate when not connected.";
+                throw new Exception(msg);
+            }
+
+            double maxLaserOnTime = 0;
+            var minWindowBasedScanRate = double.MaxValue;
+            foreach (var scanHead in ScanHeads)
+            {
+                if (scanHead.Configuration.MaxLaserOnTime > maxLaserOnTime)
+                {
+                    maxLaserOnTime = scanHead.Configuration.MaxLaserOnTime;
+                }
+
+                if (scanHead.Status.MaxScanRate < minWindowBasedScanRate)
+                {
+                    minWindowBasedScanRate = scanHead.Status.MaxScanRate;
+                }
+            }
+
+            var minLaserOnTimeBasedScanRate = 1 / (maxLaserOnTime / 1e6);
+            var minRateAmongScanHeads = Math.Min(minLaserOnTimeBasedScanRate, minWindowBasedScanRate);
+            return Math.Min(minRateAmongScanHeads, Globals.MaxScanRate);
         }
 
         #endregion

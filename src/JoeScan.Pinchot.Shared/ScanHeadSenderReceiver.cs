@@ -266,7 +266,7 @@ namespace JoeScan.Pinchot
                         {
                             if (outgoingPackets.TryDequeue(out var toSend))
                             {
-                                sendUdpClient.Send(toSend, toSend.Length);
+                                sendUdpClient.Send(toSend, toSend.Length, scanHeadDataIpEndPoint);
                             }
                         }
                     }
@@ -276,7 +276,7 @@ namespace JoeScan.Pinchot
                     {
                         if (scanRequestPacket != null)
                         {
-                            sendUdpClient.Send(scanRequestPacket, scanRequestPacket.Length);
+                            sendUdpClient.Send(scanRequestPacket, scanRequestPacket.Length, scanHeadDataIpEndPoint);
                         }
                     }
                 }
@@ -288,8 +288,7 @@ namespace JoeScan.Pinchot
                 }
                 catch (SocketException exception)
                 {
-                    throw new Exception(
-                        $"Caught SocketException: {exception.Message}; Error code: {exception.ErrorCode}");
+                    // Do nothing, we might have lost connection, but we want to keep trying as long as requested
                 }
             }
         }
@@ -392,7 +391,7 @@ namespace JoeScan.Pinchot
                                     VersionMismatchReason = e.Message;
 
                                     // Versions are not compatible, try to send a disconnect before bailing
-                                    ConnectToIP(from);
+                                    CreateIPEndPoint(from);
                                     Disconnect();
                                     Stop();
                                     break;
@@ -401,7 +400,7 @@ namespace JoeScan.Pinchot
                                 if (scanHead.SerialNumber == scanHead.Status.ScanHeadSerialNumber &&
                                     scanHeadDataIpEndPoint == null)
                                 {
-                                    ConnectToIP(from);
+                                    CreateIPEndPoint(from);
                                 }
 
                                 if (scanHeadDataIpEndPoint != null)
@@ -449,9 +448,8 @@ namespace JoeScan.Pinchot
             }
         }
 
-        private void ConnectToIP(IPAddress address)
+        private void CreateIPEndPoint(IPAddress address)
         {
-            sendUdpClient.Connect(new IPEndPoint(address, Globals.ScanServerDataPort));
             scanHeadDataIpEndPoint = new IPEndPoint(address, Globals.ScanServerDataPort);
             scanHead.IPAddress = address.MapToIPv4();
         }

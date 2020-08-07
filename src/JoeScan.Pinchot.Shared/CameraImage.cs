@@ -3,7 +3,10 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace JoeScan.Pinchot
 {
@@ -17,6 +20,12 @@ namespace JoeScan.Pinchot
     /// </remarks>
     public class CameraImage
     {
+        #region Private Fields
+
+        private const short ProfileMagic = 0xCBD;
+
+        #endregion
+
         #region Public Properties
 
         /// <summary>
@@ -79,13 +88,13 @@ namespace JoeScan.Pinchot
         /// Gets the width of the image in pixels.
         /// </summary>
         /// <value>The width of the image in pixels.</value>
-        public int Width => Globals.CameraImageDataMaxWidth;
+        public int Width { get; internal set; }
 
         /// <summary>
         /// Gets the height of the image in pixels.
         /// </summary>
         /// <value>The height of the image in pixels.</value>
-        public int Height => Globals.CameraImageDataMaxHeight;
+        public int Height { get; internal set; }
 
         #endregion
 
@@ -93,6 +102,68 @@ namespace JoeScan.Pinchot
 
         internal CameraImage()
         {
+        }
+
+        internal CameraImage(BinaryReader reader)
+            : this()
+        {
+            if (reader.ReadInt16() != ProfileMagic)
+            {
+                throw new Exception("Wrong magic header for profile");
+            }
+
+            ScanHeadID = (uint)reader.ReadInt32();
+            DataFormat = (DataFormat)reader.ReadInt32();
+            Camera = (Camera)reader.ReadInt32();
+            Laser = (Laser)reader.ReadInt32();
+            Timestamp = reader.ReadInt64();
+            var numberOfEncoders = reader.ReadInt32();
+            EncoderValues = new Dictionary<Encoder, long>(numberOfEncoders);
+            for (int i = 0; i < numberOfEncoders; i++)
+            {
+                EncoderValues[(Encoder)i] = reader.ReadInt64();
+            }
+
+            ExposureTime = reader.ReadInt32();
+            LaserOnTime = reader.ReadInt32();
+            Width = reader.ReadInt32();
+            Height = reader.ReadInt32();
+            var numberOfPixels = reader.ReadInt32();
+            Data = new byte[numberOfPixels];
+            for (var i = 0; i < numberOfPixels; i++)
+            {
+                Data[i] = reader.ReadByte();
+            }
+        }
+
+        #endregion
+
+        #region Internal Methods
+
+        internal void WriteToBinaryWriter(BinaryWriter bw)
+        {
+            bw.Write(ProfileMagic);
+            bw.Write(ScanHeadID);
+            bw.Write((int)DataFormat);
+            bw.Write((int)Camera);
+            bw.Write((int)Laser);
+            bw.Write(Timestamp);
+            bw.Write(EncoderValues.Count);
+            foreach (var val in EncoderValues.Values)
+            {
+                bw.Write(val);
+            }
+
+            bw.Write((int)ExposureTime);
+            bw.Write((int)LaserOnTime);
+            bw.Write(Width);
+            bw.Write(Height);
+            var dataArray = Data.ToArray();
+            bw.Write(dataArray.Length);
+            foreach (var pixel in dataArray)
+            {
+                bw.Write(pixel);
+            }
         }
 
         #endregion

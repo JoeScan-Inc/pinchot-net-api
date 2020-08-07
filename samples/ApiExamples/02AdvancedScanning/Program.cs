@@ -86,13 +86,11 @@ namespace _02AdvancedScanning
 
             if (scanHeadsThatFailedToConnect.Count > 0) return;
 
-            // Once configured, we can then read the status from the scan head. If
-            // each scan head was configured with a different scan window, they'll
-            // each have a different maximum scan rate.
-            foreach (var scanHead in _scanSystem.ScanHeads)
-            {
-                Console.WriteLine($"{scanHead.ID} has maximum scan rate of {scanHead.Status.MaxScanRate}Hz.");
-            }
+            // Once configured, we can then read the maximum scan rate of the scan
+            // system. This rate is governed by the scan head with the lowest scan
+            // rate based off window size and exposure values.
+            double maxScanRate = _scanSystem.GetMaxScanRate();
+            Console.WriteLine($"The system has a maximum scan rate of {maxScanRate}Hz.");
 
             // To begin scanning on all of the scan heads, all we need to do is
             // command the scan system to start scanning. This will cause all of the
@@ -195,7 +193,7 @@ namespace _02AdvancedScanning
                     // is actively being worked on in multiple threads.
                     var highestPoint = FindScanProfileHighestPoint(profiles);
                     Console.WriteLine(
-                        $"Highest point from scan head {scanHead.ID} is X: {highestPoint.X}\tY: {highestPoint.Y}\tBrightness: {highestPoint.Brightness}");
+                        $"Highest point from scan head {scanHead.ID} is X: {highestPoint.X:F3}\tY: {highestPoint.Y:F3}\tBrightness: {highestPoint.Brightness}");
                     profiles = new List<Profile>();
                 }
             }

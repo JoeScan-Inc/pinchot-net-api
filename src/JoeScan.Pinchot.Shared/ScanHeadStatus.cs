@@ -37,12 +37,6 @@ namespace JoeScan.Pinchot
         public IDictionary<Encoder, long> EncoderValues { get; internal set; }
 
         /// <summary>
-        /// Gets the highest scan rate possible with the current configuration in Hz.
-        /// </summary>
-        /// <value>The highest scan rate possible with the current configuration in Hz.</value>
-        public int MaxScanRate { get; internal set; }
-
-        /// <summary>
         /// Gets the total number of profiles sent during the last scan period (between calls to
         /// <see cref="ScanSystem.StartScanning"/> and <see cref="ScanSystem.StopScanning"/>).
         /// </summary>
@@ -134,6 +128,12 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal static int MinimumValidPacketSize =>
             Marshal.SizeOf(typeof(PacketHeader)) + Marshal.SizeOf(typeof(ScanHeadVersionInformation));
+
+        /// <summary>
+        /// Gets the highest scan rate possible with the current configuration in Hz.
+        /// </summary>
+        /// <value>The highest scan rate possible with the current configuration in Hz.</value>
+        internal int MaxScanRate { get; private set; }
 
         #endregion
 
