@@ -25,20 +25,19 @@ namespace JoeScan.Pinchot
         private int counter = 0;
         private bool disposed;
 
-        #endregion
+        #endregion Private Fields
 
         #region Internal Properties
 
-        internal readonly FixedSizedQueue<ScanSyncPacket> Packets = new FixedSizedQueue<ScanSyncPacket>(20);
         internal int EventUpdateFrequency { get; set; } = 1000;
 
-        #endregion
+        #endregion Internal Properties
 
         #region Events
 
         internal event EventHandler<ScanSyncUpdateEvent> ScanSyncUpdate;
 
-        #endregion
+        #endregion Events
 
         #region Lifecycle
 
@@ -83,13 +82,12 @@ namespace JoeScan.Pinchot
                 }
 
                 receiverClient?.Dispose();
-                Packets?.Dispose();
             }
 
             disposed = true;
         }
 
-        #endregion
+        #endregion Lifecycle
 
         #region Internal Methods
 
@@ -122,18 +120,18 @@ namespace JoeScan.Pinchot
             }
         }
 
-        #endregion
+        #endregion Internal Methods
 
         #region Private Methods
 
         private void ThreadMain()
         {
             bytesReceived = 0;
-            // this callback will kill the socket when the 
+            // this callback will kill the socket when the
             // token was canceled, which is the only way to get out
             // of the blocking udpClient.Receive()
             token.Register(() => receiverClient.Close());
-            for (;;)
+            for (; ; )
             {
                 if (token.IsCancellationRequested)
                 {
@@ -145,12 +143,11 @@ namespace JoeScan.Pinchot
                 {
                     // raw scansync packet
                     var rsp = receiverClient.Receive(ref groupEP);
-                    var pckt = new ScanSyncPacket(rsp);
-                    Packets.Enqueue(pckt);
                     goodPackets++;
                     bytesReceived += rsp.Length;
                     if (counter++ == EventUpdateFrequency)
                     {
+                        var pckt = new ScanSyncPacket(rsp);
                         ScanSyncUpdate.Raise(this, new ScanSyncUpdateEvent(pckt.ScanSyncData));
                         counter = 0;
                     }
@@ -159,18 +156,16 @@ namespace JoeScan.Pinchot
                 {
                     badPackets++;
                 }
-
                 catch (OperationCanceledException)
                 {
                     // perfectly normal, nothing to see here
                     break;
                 }
-
                 catch (SocketException)
                 {
                     // we get here if we call Close() on the UdpClient
-                    // while it is in the Receive(0 call. Apparently 
-                    // the only way to abort a Receive call is to 
+                    // while it is in the Receive(0 call. Apparently
+                    // the only way to abort a Receive call is to
                     // close the underlying Socket.
                     break;
                 }
@@ -184,6 +179,6 @@ namespace JoeScan.Pinchot
             }
         }
 
-        #endregion
+        #endregion Private Methods
     }
 }
