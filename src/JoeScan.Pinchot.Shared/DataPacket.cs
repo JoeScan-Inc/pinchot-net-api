@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Net;
 
 namespace JoeScan.Pinchot
@@ -47,6 +48,8 @@ namespace JoeScan.Pinchot
 
         internal Dictionary<DataType, FragmentLayout> FragmentLayouts { get; private set; }
 
+        private static readonly IEnumerable<DataType> dataTypeValues = Enum.GetValues(typeof(DataType)).Cast<DataType>();
+
         internal DataPacket(byte[] packet, long receivedTimeStamp)
         {
             raw = packet;
@@ -78,7 +81,7 @@ namespace JoeScan.Pinchot
             FragmentLayouts = new Dictionary<DataType, FragmentLayout>();
             var offset = 0;
             var dataOffset = 32 + 4 + NumEncoderVals * 8 + NumContentTypes * 2;
-            foreach (DataType dt in Enum.GetValues(typeof(DataType)))
+            foreach (DataType dt in dataTypeValues)
             {
                 if ((Contents & dt) != 0)
                 {
@@ -107,7 +110,10 @@ namespace JoeScan.Pinchot
 
                     var fl = new FragmentLayout()
                     {
-                        step = step, numVals = numVals, payloadsize = payloadsize, offset = dataOffset
+                        step = step,
+                        numVals = numVals,
+                        payloadsize = payloadsize,
+                        offset = dataOffset
                     };
                     dataOffset += fl.payloadsize;
                     FragmentLayouts[dt] = fl;
