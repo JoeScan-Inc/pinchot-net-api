@@ -11,7 +11,7 @@ using System.Net;
 
 namespace JoeScan.Pinchot
 {
-    class ProfileAssembler
+    internal class ProfileAssembler
     {
         #region Private Fields
 
@@ -23,13 +23,13 @@ namespace JoeScan.Pinchot
         private Point2D[] rawPointsArray;
         private int rawPointsArrayIndex;
 
-        #endregion
+        #endregion Private Fields
 
         #region Internal Properties
 
         internal bool ProfileBufferOverflowed { get; private set; }
 
-        #endregion
+        #endregion Internal Properties
 
         #region Lifecycle
 
@@ -51,7 +51,7 @@ namespace JoeScan.Pinchot
             rawPointsArrayIndex = 0;
         }
 
-        #endregion
+        #endregion Lifecycle
 
         internal void AssembleProfiles(ProfileFragments fragments)
         {
@@ -94,8 +94,8 @@ namespace JoeScan.Pinchot
                 p.Image = new byte[1456 * 1088];
             }
 
-            // helpers local 
-            var fragmentsCount = fragments.Count();
+            // helpers local
+            var fragmentsCount = fragments.Count;
             var tr = alignmentParameters[fragments[0].Camera];
             var sinRoll = tr.SinRoll;
             var cosRoll = tr.CosRoll;
@@ -130,6 +130,7 @@ namespace JoeScan.Pinchot
                                 }
 
                                 break;
+
                             case DataType.XY:
                                 for (var j = 0; j < numVals; j++)
                                 {
@@ -154,10 +155,13 @@ namespace JoeScan.Pinchot
                                 }
 
                                 break;
+
                             case DataType.PW:
                                 break;
+
                             case DataType.VR:
                                 break;
+
                             case DataType.SP:
                                 for (var j = 0; j < numVals; j++)
                                 {
@@ -175,6 +179,7 @@ namespace JoeScan.Pinchot
                                 }
 
                                 break;
+
                             case DataType.IM:
                                 //TODO:: Adapt to use SP type
                                 if (fragmentNumber == fragmentsCount - 1)
@@ -211,6 +216,7 @@ namespace JoeScan.Pinchot
                                 }
 
                                 break;
+
                             default:
                                 break;
                         }

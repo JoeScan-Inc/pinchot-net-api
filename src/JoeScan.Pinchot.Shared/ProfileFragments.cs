@@ -8,7 +8,7 @@ using System.Collections.Generic;
 
 namespace JoeScan.Pinchot
 {
-    internal class ProfileFragments : IEnumerable<DataPacket>
+    internal class ProfileFragments
     {
         private readonly List<DataPacket> rawPackets;
 
@@ -19,6 +19,8 @@ namespace JoeScan.Pinchot
         internal long Timestamp { get; }
 
         internal bool Complete { get; private set; }
+
+        internal int Count => rawPackets.Count;
 
         internal DataPacket this[int key]
         {
@@ -40,16 +42,6 @@ namespace JoeScan.Pinchot
             rawPackets.Add(dataPacket);
             // TODO: or should we explicitly check for all numbers being there?
             Complete = rawPackets[0].NumParts == rawPackets.Count;
-        }
-
-        public IEnumerator<DataPacket> GetEnumerator()
-        {
-            return rawPackets.GetEnumerator();
-        }
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
         }
     }
 }
