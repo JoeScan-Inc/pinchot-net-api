@@ -32,14 +32,13 @@ namespace JoeScan.Pinchot
         private long bytesReceived;
         private long goodPackets;
         private long evictedForTimeout;
-        private long evictedForNextSeq;
         private long lastReceivedPacketTime = long.MinValue;
 
         private IPEndPoint scanHeadDataIpEndPoint;
         private readonly UdpClient receiveUdpClient;
         private readonly UdpClient sendUdpClient;
 
-        private readonly CancellationTokenSource cancellationTokenSource = null;
+        private readonly CancellationTokenSource cancellationTokenSource;
         private readonly CancellationToken token;
 
         private readonly Thread sendMain;
@@ -90,13 +89,13 @@ namespace JoeScan.Pinchot
 
         internal long CompleteProfilesReceivedCount { get; private set; }
 
-        internal long IncompleteProfilesReceivedCount => evictedForNextSeq;
+        internal long IncompleteProfilesReceivedCount { get; private set; }
 
         internal long BadPacketsCount { get; private set; }
 
-        internal bool IsVersionMismatched = false;
+        internal bool IsVersionMismatched;
 
-        internal string VersionMismatchReason = null;
+        internal string VersionMismatchReason;
 
         #endregion
 
@@ -107,7 +106,9 @@ namespace JoeScan.Pinchot
             this.scanHead = scanHead;
 
             receiveUdpClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0))
-                { Client = { ReceiveBufferSize = Globals.DefaultUdpBufferSize } };
+            {
+                Client = { ReceiveBufferSize = Globals.DefaultUdpBufferSize }
+            };
             sendUdpClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
 
             cancellationTokenSource = new CancellationTokenSource();
@@ -144,7 +145,9 @@ namespace JoeScan.Pinchot
         protected virtual void Dispose(bool disposing)
         {
             if (disposed)
+            {
                 return;
+            }
 
             if (disposing)
             {
@@ -177,16 +180,16 @@ namespace JoeScan.Pinchot
             goodPackets = 0L;
             BadPacketsCount = 0L;
             evictedForTimeout = 0L;
-            evictedForNextSeq = 0L;
+            IncompleteProfilesReceivedCount = 0L;
             var validNics = GetValidNics();
 
-            foreach (IPAddress possibleEndPoint in validNics)
+            foreach (var possibleEndPoint in validNics)
             {
                 byte[] connectMessage = new BroadcastConnectPacket(sessionId,
                     (short)((IPEndPoint)receiveUdpClient.Client.LocalEndPoint).Port, scanHead.SerialNumber, connType,
                     possibleEndPoint).Raw;
-                IPEndPoint local = new IPEndPoint(possibleEndPoint, 0);
-                UdpClient udpc = new UdpClient();
+                var local = new IPEndPoint(possibleEndPoint, 0);
+                var udpc = new UdpClient();
                 udpc.Client.Bind(local);
                 udpc.Connect(new IPEndPoint(IPAddress.Broadcast, Globals.ScanServerDataPort));
                 udpc.Send(connectMessage, connectMessage.Length);
@@ -208,8 +211,10 @@ namespace JoeScan.Pinchot
 
         internal void SetWindow()
         {
-            Send(CreateWindowRectangularRequest(Camera.Camera0));
-            Send(CreateWindowRectangularRequest(Camera.Camera1));
+            foreach (int camera in Enumerable.Range(0, scanHead.Status.NumValidCameras))
+            {
+                Send(CreateWindowRectangularRequest((Camera)camera));
+            }
         }
 
         internal void StartScanning(double scanRate, AllDataFormat dataFormat, short startColumn, short endColumn)
@@ -218,6 +223,7 @@ namespace JoeScan.Pinchot
             this.scanRate = scanRate;
             this.startColumn = startColumn;
             this.endColumn = endColumn;
+
             profileAssembler = new ProfileAssembler(scanHead.Profiles, dataFormat, scanHead.Alignment);
             ClearScanRequests();
             lock (scanRequestPacketLock)
@@ -248,23 +254,26 @@ namespace JoeScan.Pinchot
 
         private void SendMain()
         {
-            for (;;)
+            for (; ; )
             {
                 try
                 {
                     // first send all waiting packets that are not scan requests
                     // block here for specified time
-                    var wasSignaled = evt.WaitOne(scanRequestInterval);
+                    bool wasSignaled = evt.WaitOne(scanRequestInterval);
 
                     token.ThrowIfCancellationRequested();
 
-                    if (scanHeadDataIpEndPoint == null) continue;
+                    if (scanHeadDataIpEndPoint == null)
+                    {
+                        continue;
+                    }
 
                     if (wasSignaled)
                     {
-                        while (outgoingPackets.Count > 0)
+                        while (!outgoingPackets.IsEmpty)
                         {
-                            if (outgoingPackets.TryDequeue(out var toSend))
+                            if (outgoingPackets.TryDequeue(out byte[] toSend))
                             {
                                 sendUdpClient.Send(toSend, toSend.Length, scanHeadDataIpEndPoint);
                             }
@@ -286,7 +295,7 @@ namespace JoeScan.Pinchot
                     // perfectly normal, nothing to see here
                     break;
                 }
-                catch (SocketException exception)
+                catch (SocketException)
                 {
                     // Do nothing, we might have lost connection, but we want to keep trying as long as requested
                 }
@@ -295,92 +304,68 @@ namespace JoeScan.Pinchot
 
         private void ReceiveMain()
         {
-            IPEndPoint ep = new IPEndPoint(IPAddress.Any, 0);
-
+            var ep = new IPEndPoint(IPAddress.Any, 0);
             bytesReceived = 0;
+            int lastID = 0;
+            long lastTimestamp = 0;
+            var currentProfile = new ProfileFragments();
+
             // this callback will kill the socket when the
             // token was canceled, which is the only way to get out
             // of the blocking udpClient.Receive()
-            var demuxerDict = new Dictionary<int, ProfileFragments>();
-            for (;;)
+            for (; ; )
             {
                 try
                 {
                     token.ThrowIfCancellationRequested();
 
                     // next call blocks!
-                    var raw = receiveUdpClient.Receive(ref ep);
+                    byte[] raw = receiveUdpClient.Receive(ref ep);
 
                     if (!isRunning)
                     {
-                        continue; // we ignore everything
+                        continue;
                     }
 
-                    var from = ep.Address;
                     var header = new PacketHeader(raw);
-
                     if (header.Magic == 0xFACD) // Data packet
                     {
                         lastReceivedPacketTime = timeBase.ElapsedMilliseconds;
-                        goodPackets++;
                         bytesReceived += raw.Length;
+
                         var p = new DataPacket(raw, timeBase.ElapsedMilliseconds);
-                        // handle the de-multiplexing
-                        if (p.NumParts == 1) // one part-datagram
-                        {
-                            // hand straight over to workers
-                            profileAssembler.AssembleProfiles(new ProfileFragments(p, timeBase.ElapsedMilliseconds));
-                            continue;
-                        }
+                        goodPackets++;
 
-                        // source is a composite of scan head, camera and laser, we use it to identify packets from the same head/camera/laser combo
-                        var id = p.Source;
-                        if (!demuxerDict.ContainsKey(id))
+                        int newID = p.Source;
+                        long newTimestamp = p.Timestamp;
+
+                        if (newID != lastID || newTimestamp != lastTimestamp)
                         {
-                            // first time we see a packet from this source
-                            demuxerDict[id] = new ProfileFragments(p, timeBase.ElapsedMilliseconds);
-                        }
-                        else
-                        {
-                            if (demuxerDict[id].Timestamp == p.Timestamp)
+                            if (currentProfile.Count > 0)
                             {
-                                // the timestamp on this packet is the same as is the dict, so it must belong to the same  profile
-                                demuxerDict[id].Add(p);
-                                if (demuxerDict[id].Complete)
-                                {
-                                    CompleteProfilesReceivedCount++;
-                                    // hand it off to a processor thread, we're done with it.
-                                    profileAssembler.AssembleProfiles(demuxerDict[id]);
-                                    demuxerDict.Remove(id);
-                                    // but also record the Id in a fixed size queue, so that stragglers and
-                                    // duplicates don't create a mess
-                                    // TODO: add a done queue
-                                }
+                                profileAssembler.AssembleProfiles(currentProfile);
+                                ++IncompleteProfilesReceivedCount;
+                                currentProfile.Clear();
                             }
-                            else
-                            {
-                                // the timestamp on the current packet is newer than on the existing
-                                // set of packets in the dictionary, which means we either received out of order or
-                                // a packet got lost
-                                // If we got the next in sequence, we now consider the previous profile done
-                                // hand it off to a processor thread, since we're done with it.
-                                profileAssembler.AssembleProfiles(demuxerDict[id]);
-
-                                demuxerDict.Remove(id);
-
-                                evictedForNextSeq++;
-                                demuxerDict[id] = new ProfileFragments(p, timeBase.ElapsedMilliseconds);
-                            }
-
-                            // here we would check for timeouts, but that is tricky since the Receive call blocks.
-                            // We may need to de-couple receiving from assembling.
                         }
+
+                        currentProfile.Add(p);
+                        if (currentProfile.Complete)
+                        {
+                            profileAssembler.AssembleProfiles(currentProfile);
+                            ++CompleteProfilesReceivedCount;
+                            currentProfile.Clear();
+                        }
+
+                        lastID = newID;
+                        lastTimestamp = newTimestamp;
                     }
                     else if (header.Magic == 0xFACE) // Non-data packets
                     {
                         switch (header.Type)
                         {
                             case ScanPacketType.Status:
+                                var from = ep.Address;
                                 try
                                 {
                                     scanHead.Status = new StatusPacket(raw, from).ScanHeadStatus;
@@ -451,7 +436,7 @@ namespace JoeScan.Pinchot
         private void CreateIPEndPoint(IPAddress address)
         {
             scanHeadDataIpEndPoint = new IPEndPoint(address, Globals.ScanServerDataPort);
-            scanHead.IPAddress = address.MapToIPv4();
+            scanHead.IPAddress = address;
         }
 
         // Iterates over every NIC, virtual and non-virtual and finds
@@ -485,8 +470,8 @@ namespace JoeScan.Pinchot
 
         private byte[] CreateWindowRectangularRequest(Camera camera)
         {
-            var size = 8 + 16 * scanHead.Window.WindowConstraints.Count;
-            var raw = new byte[size];
+            int size = 8 + 16 * scanHead.Window.WindowConstraints.Count;
+            byte[] raw = new byte[size];
             raw[0] = 0xFA;
             raw[1] = 0xCE;
             raw[2] = (byte)size;
@@ -498,10 +483,10 @@ namespace JoeScan.Pinchot
                     scanHead.Window.WindowConstraints[i].Y1, 0);
                 var p2Prime = scanHead.Alignment[camera].MillToCamera(scanHead.Window.WindowConstraints[i].X2,
                     scanHead.Window.WindowConstraints[i].Y2, 0);
-                var p1 = scanHead.Alignment[camera].Orientation == ScanHeadOrientation.CableIsUpstream
+                var p1 = scanHead.Alignment[camera].Orientation == ScanHeadOrientation.CableIsDownstream
                     ? p1Prime
                     : p2Prime;
-                var p2 = scanHead.Alignment[camera].Orientation == ScanHeadOrientation.CableIsUpstream
+                var p2 = scanHead.Alignment[camera].Orientation == ScanHeadOrientation.CableIsDownstream
                     ? p2Prime
                     : p1Prime;
                 Array.Copy(
@@ -528,15 +513,15 @@ namespace JoeScan.Pinchot
         private byte[] CreateScanRequest()
         {
             // get the number of data types requested, the length of the steps array is a good proxy
-            var stepArray = ResolutionPresets.GetStep(dataFormat);
+            short[] stepArray = ResolutionPresets.GetStep(dataFormat);
 
-            var raw = new byte[74 + stepArray.Length * 2];
+            byte[] raw = new byte[74 + stepArray.Length * 2];
             raw[0] = 0xFA;
             raw[1] = 0xCE;
             raw[2] = 12;
             raw[3] = (byte)ScanPacketType.StartScanning;
             raw[4] = raw[5] = raw[6] = raw[7] = 0;
-            var p = BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)LocalReceiveIpEndPoint.Port));
+            byte[] p = BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)LocalReceiveIpEndPoint.Port));
             raw[8] = p[0];
             raw[9] = p[1];
             raw[10] = ScanSystem.SessionId;
@@ -588,8 +573,8 @@ namespace JoeScan.Pinchot
             Array.Copy(
                 BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)ResolutionPresets.GetDataType(dataFormat))),
                 0, raw, 68, 2);
-            Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)startColumn)), 0, raw, 70, 2);
-            Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)endColumn)), 0, raw, 72, 2);
+            Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder(startColumn)), 0, raw, 70, 2);
+            Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder(endColumn)), 0, raw, 72, 2);
             for (int i = 0; i < stepArray.Length; i++)
             {
                 Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder(stepArray[i])), 0, raw, 74 + 2 * i, 2);
@@ -600,7 +585,7 @@ namespace JoeScan.Pinchot
 
         private void StatsThread()
         {
-            var lastCheck = timeBase.ElapsedMilliseconds;
+            long lastCheck = timeBase.ElapsedMilliseconds;
             long bytesReceivedSinceLastCheck = 0;
             long profilesReceivedSinceLastCheck = 0;
             while (true)
@@ -610,15 +595,15 @@ namespace JoeScan.Pinchot
                     token.ThrowIfCancellationRequested();
                     Task.Delay(200, token).Wait(token);
                     long now = timeBase.ElapsedMilliseconds;
-                    var dataRate = (bytesReceived - bytesReceivedSinceLastCheck) * 1000.0 / (now - lastCheck);
-                    var profileRate = (CompleteProfilesReceivedCount - profilesReceivedSinceLastCheck) * 1000 /
+                    double dataRate = (bytesReceived - bytesReceivedSinceLastCheck) * 1000.0 / (now - lastCheck);
+                    long profileRate = (CompleteProfilesReceivedCount - profilesReceivedSinceLastCheck) * 1000 /
                                       (now - lastCheck);
 
                     commStats.ID = scanHead.ID;
                     commStats.CompleteProfilesReceived = CompleteProfilesReceivedCount;
                     commStats.ProfileRate = profileRate;
                     commStats.BytesReceived = bytesReceived;
-                    commStats.Evicted = evictedForTimeout + evictedForNextSeq;
+                    commStats.Evicted = evictedForTimeout + IncompleteProfilesReceivedCount;
                     commStats.DataRate = dataRate;
                     commStats.BadPackets = BadPacketsCount;
                     commStats.GoodPackets = goodPackets;

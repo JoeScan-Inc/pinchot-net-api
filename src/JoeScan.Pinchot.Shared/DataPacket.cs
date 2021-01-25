@@ -66,7 +66,7 @@ namespace JoeScan.Pinchot
             NumEncoderVals = packet[22];
             EncoderVals = new long[NumEncoderVals];
             int encOffset = NumContentTypes * 2 + 4; // offset from the end of the header at byte 32
-            for (var i = 0; i < NumEncoderVals; i++)
+            for (int i = 0; i < NumEncoderVals; i++)
             {
                 EncoderVals[i] = IPAddress.NetworkToHostOrder(BitConverter.ToInt64(packet, 32 + encOffset + i * 8));
             }
@@ -76,19 +76,19 @@ namespace JoeScan.Pinchot
             EndColumn = IPAddress.NetworkToHostOrder(BitConverter.ToInt16(packet, 34));
 
             FragmentLayouts = new Dictionary<DataType, FragmentLayout>();
-            var offset = 0;
-            var dataOffset = 32 + 4 + NumEncoderVals * 8 + NumContentTypes * 2;
-            foreach (DataType dt in Enum.GetValues(typeof(DataType)))
+            int offset = 0;
+            int dataOffset = 32 + 4 + NumEncoderVals * 8 + NumContentTypes * 2;
+            foreach (DataType dt in DataTypeValues.DataTypes)
             {
                 if ((Contents & dt) != 0)
                 {
-                    var step = IPAddress.NetworkToHostOrder(BitConverter.ToInt16(packet, 32 + 4 + offset));
+                    short step = IPAddress.NetworkToHostOrder(BitConverter.ToInt16(packet, 32 + 4 + offset));
 
                     int payloadsize;
                     int numVals;
                     if (dt != DataType.IM)
                     {
-                        var numCols = (int)(EndColumn - StartColumn + 1);
+                        int numCols = EndColumn - StartColumn + 1;
                         numVals = numCols / (NumParts * step);
                         // If the data doesn't divide evenly into the DataPackets, each DataPacket starting
                         // from the first will have 1 additional value of the type in question.
@@ -107,8 +107,12 @@ namespace JoeScan.Pinchot
 
                     var fl = new FragmentLayout()
                     {
-                        step = step, numVals = numVals, payloadsize = payloadsize, offset = dataOffset
+                        step = step,
+                        numVals = numVals,
+                        payloadsize = payloadsize,
+                        offset = dataOffset
                     };
+
                     dataOffset += fl.payloadsize;
                     FragmentLayouts[dt] = fl;
                     offset += 2;

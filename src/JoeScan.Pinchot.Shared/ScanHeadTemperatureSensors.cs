@@ -4,6 +4,7 @@
 // root for license information.
 
 using Newtonsoft.Json;
+using System.Collections.Generic;
 
 namespace JoeScan.Pinchot
 {
@@ -12,13 +13,13 @@ namespace JoeScan.Pinchot
         [JsonProperty("mainboardHumidity")]
         internal float MainboardHumidity { get; set; }
 
-        [JsonProperty("camera0")]
-        internal float Camera0 { get; set; }
-
-        [JsonProperty("camera1")]
-        internal float Camera1 { get; set; }
+        [JsonProperty("camera")]
+        internal List<float> Cameras { get; set; }
 
         [JsonProperty("mainboard")]
         internal float Mainboard { get; set; }
+
+        [JsonProperty("ps")]
+        internal float PS { get; set; }
     }
 }

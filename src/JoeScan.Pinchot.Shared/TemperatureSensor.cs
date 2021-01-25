@@ -11,18 +11,23 @@ namespace JoeScan.Pinchot
     public enum TemperatureSensor
     {
         /// <summary>
-        /// Camera 0 temperature sensor.
+        /// Camera A temperature sensor.
         /// </summary>
-        Camera0 = 0,
+        CameraA = 0,
 
         /// <summary>
-        /// Camera 1 temperature sensor.
+        /// Camera B temperature sensor.
         /// </summary>
-        Camera1,
+        CameraB,
 
         /// <summary>
         /// Motherboard temperature sensor.
         /// </summary>
         Motherboard,
+        
+        /// <summary>
+        /// Temperature for the Processor on SoC
+        /// </summary>
+        PS,
     }
 }

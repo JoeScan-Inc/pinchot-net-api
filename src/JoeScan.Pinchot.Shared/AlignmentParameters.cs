@@ -32,10 +32,10 @@ namespace JoeScan.Pinchot
                 switch (orientation)
                 {
                     case ScanHeadOrientation.CableIsUpstream:
-                        yaw = 0;
+                        yaw = 180;
                         break;
                     case ScanHeadOrientation.CableIsDownstream:
-                        yaw = 180;
+                        yaw = 0;
                         break;
                     default:
                         yaw = 0;

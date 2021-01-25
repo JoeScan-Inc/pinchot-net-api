@@ -9,15 +9,9 @@ namespace JoeScan.Pinchot
 {
     internal class ScanHeadLaserCameraExposureTimes
     {
-        [JsonProperty("camera0")]
-        internal LaserCameraExposureTimes Camera0 { get; set; }
+        [JsonProperty("autoexpose")]
+        internal bool AutoexposeEnables { get; set; }
 
-        [JsonProperty("camera1")]
-        internal LaserCameraExposureTimes Camera1 { get; set; }
-    }
-
-    internal class LaserCameraExposureTimes
-    {
         [JsonProperty("cameraStart")]
         internal uint CameraStartTime { get; set; }
 

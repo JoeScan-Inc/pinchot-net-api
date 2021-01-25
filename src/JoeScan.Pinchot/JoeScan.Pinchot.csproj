@@ -26,17 +26,17 @@
   <Import Project="..\JoeScan.Pinchot.Shared\JoeScan.Pinchot.Shared.projitems" Label="Shared" />
 
   <ItemGroup>
-    <PackageReference Include="GitVersionTask" Version="5.2.4">
+    <PackageReference Include="GitVersionTask" Version="5.3.7">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.CodeAnalysis.FxCopAnalyzers" Version="2.9.7">
+    <PackageReference Include="Microsoft.CodeAnalysis.FxCopAnalyzers" Version="3.3.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
-    <PackageReference Include="RestSharp" Version="106.10.1" />
-    <PackageReference Include="System.Memory" Version="4.5.3" />
+    <PackageReference Include="RestSharp" Version="106.11.4" />
+    <PackageReference Include="System.Memory" Version="4.5.4" />
     <None Include="JoeScanDeveloperIcon128.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 

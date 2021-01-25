@@ -5,13 +5,6 @@
 
 namespace JoeScan.Pinchot
 {
-    internal enum ScanHeadVersionHardwareId : ushort
-    {
-        Invalid = 0,
-        XU3 = 1,
-        TE0820 = 2
-    }
-
     internal enum ScanHeadVersionFlagMask : ushort
     {
         Dirty = 1 << 0,
@@ -23,6 +16,8 @@ namespace JoeScan.Pinchot
     /// </summary>
     public struct ScanHeadVersionInformation
     {
+        #region Public Properties
+
         /// <summary>
         /// Gets the major version component of the of the scan head firmware version.
         /// </summary>
@@ -41,15 +36,26 @@ namespace JoeScan.Pinchot
         /// <value>The patch version component of the of the scan head firmware version.</value>
         public uint Patch { get; internal set; }
 
-        internal uint Commit;
-        internal ScanHeadVersionHardwareId HardwareId;
-        internal ushort Flags;
-
         /// <summary>
         /// Gets the scan head firmware version.
         /// </summary>
         /// <value>The scan head firmware version.</value>
         public string Version =>
             Flags.Equals(0) ? $"{Major}.{Minor}.{Patch}" : $"{Major}.{Minor}.{Patch}-{Flags}+{Commit:X}";
+
+        /// <summary>
+        /// Gets the product type of the scan head.
+        /// </summary>
+        /// <value>The product type.</value>
+        public ProductType Product { get; internal set; }
+
+        #endregion
+
+        #region Internal Properties
+
+        internal uint Commit;
+        internal ushort Flags;
+
+        #endregion
     }
 }

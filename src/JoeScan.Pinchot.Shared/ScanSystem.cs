@@ -307,8 +307,7 @@ namespace JoeScan.Pinchot
             }
 
             var connectedHeads = ScanHeads.Where(s => connectedHeadIPs.Contains(s.IPAddress)).ToList();
-
-            foreach (var s in ScanHeads.Where(s => s.Enabled))
+            foreach (var s in connectedHeads.Where(s => s.Enabled))
             {
                 s.SetWindow();
             }
@@ -373,13 +372,13 @@ namespace JoeScan.Pinchot
         /// </remarks>
         /// <param name="rate">The scan rate in Hz.</param>
         /// <param name="dataFormat">The <see cref="DataFormat"/>.</param>
-        /// <exception cref="System.Exception">
+        /// <exception cref="Exception">
         /// <see cref="IsConnected"/> is `false`.<br/>
         /// -or-<br/>
         /// <see cref="IsScanning"/> is `true`.
         /// </exception>
         /// <exception cref="ArgumentException">
-        /// Requested scan rate <paramref name="rate"/> is greater than <see cref="MaxScanRate"/>.
+        /// Requested scan rate <paramref name="rate"/> is greater than <see cref="GetMaxScanRate"/>.
         /// </exception>
         public void StartScanning(double rate, DataFormat dataFormat)
         {
@@ -441,7 +440,7 @@ namespace JoeScan.Pinchot
         /// Gets the maximum scan rate allowed by the <see cref="ScanSystem"/> in Hz.
         /// </summary>
         /// <returns>The maximum scan rate allowed by the <see cref="ScanSystem"/> in Hz.</returns>
-        /// <exception cref="System.Exception">
+        /// <exception cref="Exception">
         /// <see cref="IsConnected"/> is `false`.
         /// </exception>
         public double GetMaxScanRate()

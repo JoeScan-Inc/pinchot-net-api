@@ -1,8 +1,6 @@
-- name: Articles
-  href: articles/
 - name: .NET/C# API Documentation
   href: api/
-  homepage: api/Net_index.md
+  homepage: api/index.md
 - name: .NET/C# API Examples
   href: DotNet_examples/
   homepage: DotNet_examples/DotNet_intro.md

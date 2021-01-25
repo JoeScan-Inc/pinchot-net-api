@@ -130,10 +130,51 @@ namespace JoeScan.Pinchot
             Marshal.SizeOf(typeof(PacketHeader)) + Marshal.SizeOf(typeof(ScanHeadVersionInformation));
 
         /// <summary>
-        /// Gets the highest scan rate possible with the current configuration in Hz.
+        /// Gets the highest scan rate possible with the current configuration in Hz. Consumers of the
+        /// API should instead use <see cref="ScanSystem.GetMaxScanRate"/>.
         /// </summary>
         /// <value>The highest scan rate possible with the current configuration in Hz.</value>
         internal int MaxScanRate { get; private set; }
+
+        /// <summary>
+        /// Reserved for future use.
+        /// </summary>
+        internal uint Reserved0 { get; private set; }
+
+        /// <summary>
+        /// Reserved for future use.
+        /// </summary>
+        internal uint Reserved1 { get; private set; }
+
+        /// <summary>
+        /// Reserved for future use.
+        /// </summary>
+        internal uint Reserved2 { get; private set; }
+
+        /// <summary>
+        /// Reserved for future use.
+        /// </summary>
+        internal uint Reserved3 { get; private set; }
+
+        /// <summary>
+        /// Reserved for future use.
+        /// </summary>
+        internal uint Reserved4 { get; private set; }
+
+        /// <summary>
+        /// Reserved for future use.
+        /// </summary>
+        internal uint Reserved5 { get; private set; }
+
+        /// <summary>
+        /// Reserved for future use.
+        /// </summary>
+        internal uint Reserved6 { get; private set; }
+
+        /// <summary>
+        /// Reserved for future use.
+        /// </summary>
+        internal uint Reserved7 { get; private set; }
 
         #endregion
 
@@ -167,8 +208,8 @@ namespace JoeScan.Pinchot
                 Minor = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx),
                 Patch = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx),
                 Commit = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx),
-                HardwareId =
-                    (ScanHeadVersionHardwareId)NetworkByteUnpacker.ExtractUShortFromNetworkBuffer(buf, ref idx),
+                Product =
+                    (ProductType)NetworkByteUnpacker.ExtractUShortFromNetworkBuffer(buf, ref idx),
                 Flags = NetworkByteUnpacker.ExtractUShortFromNetworkBuffer(buf, ref idx)
             };
 
@@ -191,6 +232,15 @@ namespace JoeScan.Pinchot
             ProfilesSentCount = NetworkByteUnpacker.ExtractIntFromNetworkBuffer(buf, ref idx);
             NumValidEncoders = NetworkByteUnpacker.ExtractByteFromNetworkBuffer(buf, ref idx);
             NumValidCameras = NetworkByteUnpacker.ExtractByteFromNetworkBuffer(buf, ref idx);
+
+            Reserved0 = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx);
+            Reserved1 = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx);
+            Reserved2 = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx);
+            Reserved3 = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx);
+            Reserved4 = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx);
+            Reserved5 = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx);
+            Reserved6 = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx);
+            Reserved7 = NetworkByteUnpacker.ExtractUIntFromNetworkBuffer(buf, ref idx);
 
             // Variable Length Data
             EncoderValues = new Dictionary<Encoder, long>(NumValidEncoders);

@@ -32,6 +32,15 @@ namespace JoeScan.Pinchot
 
         #endregion
 
+        #region Backing Fields
+
+        private Dictionary<Camera, AlignmentParameters> alignment = new Dictionary<Camera, AlignmentParameters>()
+        {
+            { Camera.AllCameras, new AlignmentParameters(0, 0, 0, ScanHeadOrientation.CableIsUpstream) }
+        };
+
+        #endregion
+
         #region Events
 
         internal event EventHandler<CommStatsEventArgs> StatsEvent;
@@ -136,12 +145,25 @@ namespace JoeScan.Pinchot
         /// <seealso cref="SetAlignment(double, double, double, ScanHeadOrientation)"/> or 
         /// <seealso cref="SetAlignment(Camera, double, double, double, ScanHeadOrientation)"/>
         [JsonProperty(nameof(Alignment))]
-        internal Dictionary<Camera, AlignmentParameters> Alignment { get; private set; } =
-            new Dictionary<Camera, AlignmentParameters>()
+        internal Dictionary<Camera, AlignmentParameters> Alignment
+        {
+            get
             {
-                { Camera.Camera0, new AlignmentParameters(0, 0, 0, ScanHeadOrientation.CableIsUpstream) },
-                { Camera.Camera1, new AlignmentParameters(0, 0, 0, ScanHeadOrientation.CableIsUpstream) }
-            };
+                if (alignment.ContainsKey(Camera.AllCameras) && Status != null)
+                {
+                    var a = alignment[Camera.AllCameras];
+                    alignment.Clear();
+                    foreach (int i in Enumerable.Range(0, Status.NumValidCameras))
+                    {
+                        alignment[(Camera)i] = a;
+                    }
+                }
+
+                return alignment;
+            }
+
+            private set => alignment = value;
+        }
 
         /// <summary>
         /// Gets the <see cref="ScanWindow"/> within which a camera will look for the laser.
@@ -328,8 +350,8 @@ namespace JoeScan.Pinchot
                 throw new Exception("Can not set alignment while connected.");
             }
 
-            Alignment[Camera.Camera0] = new AlignmentParameters(rollDegrees, shiftX, shiftY, orientation);
-            Alignment[Camera.Camera1] = new AlignmentParameters(rollDegrees, shiftX, shiftY, orientation);
+            Alignment.Clear();
+            Alignment[Camera.AllCameras] = new AlignmentParameters(rollDegrees, shiftX, shiftY, orientation);
         }
 
         /// <summary>
@@ -487,7 +509,7 @@ namespace JoeScan.Pinchot
         /// transform the data from a camera based coordinate system to one based on
         /// mill placement. Parameters are applied to all cameras.
         /// </summary>
-        /// <param name="p">The p.</param>
+        /// <param name="p">The alignment parameters.</param>
         internal void SetAlignment(AlignmentParameters p)
         {
             if (IsConnected)
@@ -495,8 +517,8 @@ namespace JoeScan.Pinchot
                 throw new Exception("Can not set alignment while connected.");
             }
 
-            Alignment[Camera.Camera0] = new AlignmentParameters(p);
-            Alignment[Camera.Camera1] = new AlignmentParameters(p);
+            Alignment.Clear();
+            Alignment[Camera.AllCameras] = new AlignmentParameters(p);
         }
 
         // Should only ever be used when loading scan heads from file (JSON deserialization)
@@ -509,7 +531,7 @@ namespace JoeScan.Pinchot
             CancellationToken token)
         {
             var images = new Dictionary<Camera, IList<CameraImage>>();
-            for (var camera = Camera.Camera0; (int)camera < Status.NumValidCameras; camera++)
+            for (var camera = Camera.CameraA; (int)camera < Status.NumValidCameras; camera++)
             {
                 images.Add(camera, new List<CameraImage>());
             }
@@ -603,79 +625,66 @@ namespace JoeScan.Pinchot
             return images;
         }
 
-        internal ScanHeadTemperatureSensors GetTemperatureData()
+        internal T PerformRestGetRequest<T>(string endpoint)
         {
-            var restClient = new RestClient($"http://{IPAddress}:8080/sensors");
+            var restClient = new RestClient($"http://{IPAddress}:8080/");
             restClient.UseJson();
-            var request = new RestRequest("temperature");
-            request.AddHeader("Content-Type", "application/json");
-            var response = restClient.Execute(request);
+            var req = new RestRequest(endpoint);
+            req.AddHeader("Content-Type", "application/json");
+            var response = restClient.Execute(req);
             if (!response.IsSuccessful)
             {
-                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
+                throw new Exception($"REST GET request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
             }
 
-            return JsonConvert.DeserializeObject<ScanHeadTemperatureSensors>(response.Content);
+            return JsonConvert.DeserializeObject<T>(response.Content);
+        }
+
+        internal void PerformRestPostRequest(string endpoint, object body)
+        {
+            var restClient = new RestClient($"http://{IPAddress}:8080/");
+            restClient.UseJson();
+            var req = new RestRequest(endpoint)
+            {
+                Method = Method.POST
+            };
+            req.AddHeader("Content-Type", "application/json");
+            req.AddJsonBody(body);
+            var response = restClient.Execute(req);
+            if (!response.IsSuccessful)
+            {
+                throw new Exception($"REST POST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
+            }
+        }
+
+        internal ScanHeadTemperatureSensors GetTemperatureData()
+        {
+            return PerformRestGetRequest<ScanHeadTemperatureSensors>("sensors/temperature");
         }
 
         internal ScanHeadPowerSensors GetPowerData()
         {
-            var restClient = new RestClient($"http://{IPAddress}:8080/sensors");
-            restClient.UseJson();
-            var request = new RestRequest("power");
-            request.AddHeader("Content-Type", "application/json");
-            var response = restClient.Execute(request);
-            if (!response.IsSuccessful)
-            {
-                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
-            }
-
-            return JsonConvert.DeserializeObject<ScanHeadPowerSensors>(response.Content);
+            return PerformRestGetRequest<ScanHeadPowerSensors>("sensors/power");
         }
 
         internal ScanHeadChannelAlignment GetChannelAlignmentData()
         {
-            var restClient = new RestClient($"http://{IPAddress}:8080/tests");
-            restClient.UseJson();
-            var request = new RestRequest("channel-alignment");
-            request.AddHeader("Content-Type", "application/json");
-            var response = restClient.Execute(request);
-            if (!response.IsSuccessful)
-            {
-                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
-            }
-
-            return JsonConvert.DeserializeObject<ScanHeadChannelAlignment>(response.Content);
+            return PerformRestGetRequest<ScanHeadChannelAlignment>("tests/channel-alignment");
         }
 
         internal ScanHeadLaserCameraExposureTimes GetExposureTimes()
         {
-            var restClient = new RestClient($"http://{IPAddress}:8080/config");
-            restClient.UseJson();
-            var request = new RestRequest("exposure-times");
-            request.AddHeader("Content-Type", "application/json");
-            var response = restClient.Execute(request);
-            if (!response.IsSuccessful)
-            {
-                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
-            }
-
-            return JsonConvert.DeserializeObject<ScanHeadLaserCameraExposureTimes>(response.Content);
+            return PerformRestGetRequest<ScanHeadLaserCameraExposureTimes>("config/exposure-times");
         }
 
         internal void SetCameraLaserExposureTimes(uint cameraStart, uint cameraEnd, uint laserStart, uint laserEnd)
         {
-            var restClient = new RestClient($"http://{IPAddress}:8080/config");
-            restClient.UseJson();
-            var request = new RestRequest("exposure-times");
-            request.Method = Method.POST;
-            request.AddHeader("Content-Type", "application/json");
-            request.AddJsonBody(new { cameraStart, cameraEnd, laserStart, laserEnd });
-            var response = restClient.Execute(request);
-            if (!response.IsSuccessful)
-            {
-                throw new Exception($"REST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
-            }
+            PerformRestPostRequest("config/exposure-times", new { cameraStart, cameraEnd, laserStart, laserEnd });
+        }
+
+        internal ScanHeadUuids GetUuids()
+        {
+            return PerformRestGetRequest<ScanHeadUuids>("uuids");
         }
 
         #endregion

@@ -15,6 +15,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadLaserCameraExposureTimes.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadTemperatureSensors.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadPowerSensors.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ScanHeadUuids.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadVersionInformation.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)WindowConstraint.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Point2D.cs" />

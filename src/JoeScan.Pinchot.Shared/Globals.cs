@@ -13,11 +13,8 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// The max scan rate
         /// </summary>
-#if PINCHOT_NO_MAX_SCAN_RATE
-        public const int MaxScanRate = 10000;
-#else
-        public const int MaxScanRate = 3200;
-#endif
+        public const int MaxScanRate = 4000;
+
         /// <summary>
         /// The raw profile data length.
         /// </summary>

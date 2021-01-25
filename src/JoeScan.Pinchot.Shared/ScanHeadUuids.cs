@@ -8,15 +8,12 @@ using System.Collections.Generic;
 
 namespace JoeScan.Pinchot
 {
-    internal class ScanHeadChannelAlignment
+    internal class ScanHeadUuids
     {
         [JsonProperty("camera")]
-        internal List<ChannelAlignment> Cameras { get; set; }
-    }
+        internal List<ulong> Camera { get; set; }
 
-    internal class ChannelAlignment
-    {
-        [JsonProperty("channel")]
-        internal List<double> Channels;
+        [JsonProperty("mainboard")]
+        internal ulong Mainboard { get; set; }
     }
 }

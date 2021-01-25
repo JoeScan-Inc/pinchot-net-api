@@ -11,8 +11,18 @@ namespace JoeScan.Pinchot
     public enum ProductType
     {
         /// <summary>
+        /// Invalid
+        /// </summary>
+        Invalid = 0,
+
+        /// <summary>
         /// JS-50 WX
         /// </summary>
-        JS50WX = 0,
+        JS50WX = 1,
+
+        /// <summary>
+        /// JS-50 SC
+        /// </summary>
+        JS50SC = 2,
     }
 }

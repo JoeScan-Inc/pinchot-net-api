@@ -3,31 +3,35 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using System.Collections;
 using System.Collections.Generic;
 
 namespace JoeScan.Pinchot
 {
-    internal class ProfileFragments : IEnumerable<DataPacket>
+    internal class ProfileFragments
     {
         private readonly List<DataPacket> rawPackets;
 
-        internal long TimeCreated { get; }
+        internal long TimeCreated { get; private set; }
 
-        internal int Source { get; }
+        internal int Source { get; private set; }
 
-        internal long Timestamp { get; }
+        internal long Timestamp { get; private set; }
 
         internal bool Complete { get; private set; }
 
-        internal DataPacket this[int key]
+        internal int Count => rawPackets?.Count ?? 0;
+
+        internal DataPacket this[int key] => rawPackets[key];
+
+        internal ProfileFragments()
         {
-            get { return rawPackets[key]; }
+            rawPackets = new List<DataPacket>(10);
         }
 
         internal ProfileFragments(DataPacket data, long timeCreated)
+            : this()
         {
-            rawPackets = new List<DataPacket>(10) { data };
+            rawPackets.Add(data);
             TimeCreated = timeCreated;
             Timestamp = data.Timestamp;               // immutable
             Complete = data.NumParts == data.PartNum; // single part profile
@@ -42,14 +46,13 @@ namespace JoeScan.Pinchot
             Complete = rawPackets[0].NumParts == rawPackets.Count;
         }
 
-        public IEnumerator<DataPacket> GetEnumerator()
+        internal void Clear()
         {
-            return rawPackets.GetEnumerator();
-        }
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
+            rawPackets.Clear();
+            TimeCreated = default;
+            Source = default;
+            Timestamp = default;
+            Complete = default;
         }
     }
 }

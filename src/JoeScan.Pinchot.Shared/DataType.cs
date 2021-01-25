@@ -4,11 +4,13 @@
 // root for license information.
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace JoeScan.Pinchot
 {
     [Flags]
-    internal enum DataType : UInt16
+    internal enum DataType : ushort
     {
         LM = 0x1,  // Brightness Data (LM, for Luminosity)
         XY = 0x2,  // XY data (XY)
@@ -16,6 +18,14 @@ namespace JoeScan.Pinchot
         VR = 0x8,  // 2nd Moment Data (VR, for Variance)
         SP = 0x10, // camera coordinates
         IM = 0x20  // Image data
+    }
+
+    /// <summary>
+    /// Use this class as a way to enumerate through all <see cref="DataType"/> values.
+    /// </summary>
+    internal static class DataTypeValues
+    {
+        internal static readonly IEnumerable<DataType> DataTypes = Enum.GetValues(typeof(DataType)).Cast<DataType>();
     }
 
     internal static class DataSizes

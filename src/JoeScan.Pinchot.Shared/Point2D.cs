@@ -42,14 +42,20 @@ namespace JoeScan.Pinchot
 
         #region Lifecycle
 
-        internal Point2D(float x, float y, int brightness)
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Point2D"/> struct.
+        /// </summary>
+        public Point2D(float x, float y, int brightness)
         {
             X = x;
             Y = y;
             Brightness = brightness;
         }
 
-        internal Point2D(double x, double y, int brightness)
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Point2D"/> struct.
+        /// </summary>
+        public Point2D(double x, double y, int brightness)
         {
             X = x;
             Y = y;

@@ -17,8 +17,8 @@ namespace JoeScan.Pinchot
     /// are used to define the area, in mill coordinates, within which valid <see cref="Profile"/> <see cref="Point2D"/>s are to
     /// be measured. <see cref="ScanWindow"/>s can be used to restrict the scan area only to the region of interest, eliminate
     /// interference from ambient or stray light, eliminate erroneous or unnecessary data from machinery, etc. Decreasing the
-    /// scan window in the scan head's y axis (depth) will allow for faster scan rates. Use <see cref="ScanHeadStatus.MaxScanRate"/>
-    /// to retrieve the maximum scan rate based on the currently applied window.
+    /// scan window in the scan head's y axis (depth) will allow for faster scan rates. Use <see cref="ScanSystem.GetMaxScanRate"/>
+    /// to retrieve the maximum scan rate of the entire scan system based on the currently applied scan windows of all scan heads.
     /// </remarks>
     public class ScanWindow : ICloneable
     {
