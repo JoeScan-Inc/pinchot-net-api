@@ -250,7 +250,7 @@ namespace JoeScan.Pinchot
         /// </remarks>
         /// <param name="configuration">The <see cref="ScanHeadConfiguration"/> to use for configuration
         /// of the physical scan head.</param>
-        /// <exception cref="Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="ScanSystem.IsScanning"/> is `true`.
         /// </exception>
         /// <exception cref="ArgumentNullException">
@@ -260,7 +260,7 @@ namespace JoeScan.Pinchot
         {
             if (scanSystem.IsScanning)
             {
-                throw new Exception("Can not set configuration while scanning.");
+                throw new InvalidOperationException("Can not set configuration while scanning.");
             }
 
             if (configuration == null)
@@ -340,14 +340,14 @@ namespace JoeScan.Pinchot
         /// <param name="shiftX">The shift along the X axis in the mill coordinate system in inches.</param>
         /// <param name="shiftY">The shift along the Y axis in the mill coordinate system in inches.</param>
         /// <param name="orientation">The <see cref="ScanHeadOrientation"/>.</param>
-        /// <exception cref="Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `true`.
         /// </exception>
         public void SetAlignment(double rollDegrees, double shiftX, double shiftY, ScanHeadOrientation orientation)
         {
             if (IsConnected)
             {
-                throw new Exception("Can not set alignment while connected.");
+                throw new InvalidOperationException("Can not set alignment while connected.");
             }
 
             Alignment.Clear();
@@ -367,7 +367,7 @@ namespace JoeScan.Pinchot
         /// <param name="shiftX">The shift along the X axis in the mill coordinate system in inches.</param>
         /// <param name="shiftY">The shift along the Y axis in the mill coordinate system in inches.</param>
         /// <param name="orientation">The <see cref="ScanHeadOrientation"/>.</param>
-        /// <exception cref="Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `true`.
         /// </exception>
         public void SetAlignment(Camera camera, double rollDegrees, double shiftX, double shiftY,
@@ -375,7 +375,7 @@ namespace JoeScan.Pinchot
         {
             if (IsConnected)
             {
-                throw new Exception("Can not set alignment while connected.");
+                throw new InvalidOperationException("Can not set alignment while connected.");
             }
 
             Alignment[camera] = new AlignmentParameters(rollDegrees, shiftX, shiftY, orientation);
@@ -389,7 +389,7 @@ namespace JoeScan.Pinchot
         /// The <see cref="ScanWindow"/> constraints are only sent to the scan head when <see cref="ScanSystem.Connect"/> is called.
         /// </remarks>
         /// <param name="window">The <see cref="ScanWindow"/> to use for the <see cref="ScanHead"/>.</param>
-        /// <exception cref="Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `true`.
         /// </exception>
         /// <exception cref="ArgumentNullException">
@@ -399,7 +399,7 @@ namespace JoeScan.Pinchot
         {
             if (IsConnected)
             {
-                throw new Exception("Can not set scan window while connected.");
+                throw new InvalidOperationException("Can not set scan window while connected.");
             }
 
             if (window == null)
@@ -417,18 +417,23 @@ namespace JoeScan.Pinchot
         /// <param name="enableLasers">A value indicating whether to enable the <see cref="Laser"/>(s)
         /// during the image capture.</param>
         /// <returns>The <see cref="CameraImage"/>.</returns>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="IsConnected"/> is `false`.<br/>
+        /// -or-<br/>
+        /// <see cref="ScanSystem.IsScanning"/> is `true`.
+        /// </exception>
         public CameraImage GetCameraImage(Camera camera, bool enableLasers)
         {
             if (!IsConnected)
             {
                 var msg = "Not connected.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (scanSystem.IsScanning)
             {
                 var msg = "Scan system is scanning.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             var images = GetCameraImages(1, enableLasers, CancellationToken.None);
@@ -514,7 +519,7 @@ namespace JoeScan.Pinchot
         {
             if (IsConnected)
             {
-                throw new Exception("Can not set alignment while connected.");
+                throw new InvalidOperationException("Can not set alignment while connected.");
             }
 
             Alignment.Clear();
@@ -539,13 +544,13 @@ namespace JoeScan.Pinchot
             if (!IsConnected)
             {
                 var msg = "Not connected.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (scanSystem.IsScanning)
             {
                 var msg = "Scan system is scanning.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             var userConfig = GetConfigurationClone();
@@ -634,7 +639,7 @@ namespace JoeScan.Pinchot
             var response = restClient.Execute(req);
             if (!response.IsSuccessful)
             {
-                throw new Exception($"REST GET request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
+                throw new WebException($"REST GET request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
             }
 
             return JsonConvert.DeserializeObject<T>(response.Content);
@@ -653,7 +658,7 @@ namespace JoeScan.Pinchot
             var response = restClient.Execute(req);
             if (!response.IsSuccessful)
             {
-                throw new Exception($"REST POST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
+                throw new WebException($"REST POST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
             }
         }
 

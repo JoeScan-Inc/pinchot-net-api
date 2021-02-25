@@ -17,7 +17,7 @@ namespace JoeScan.Pinchot
         {
             if (raw.Length < 4)
             {
-                throw new Exception("Invalid size for packet header");
+                throw new ArgumentException("Invalid size for packet header");
             }
 
             Magic = (ushort)((raw[0] << 8) + raw[1]);

@@ -109,7 +109,7 @@ namespace JoeScan.Pinchot
         {
             if (reader.ReadInt16() != ProfileMagic)
             {
-                throw new Exception("Wrong magic header for profile");
+                throw new ArgumentException("Wrong magic header for profile");
             }
 
             ScanHeadID = (uint)reader.ReadInt32();

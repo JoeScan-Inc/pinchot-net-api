@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <TargetFrameworks>netcoreapp3.1;netstandard2.0</TargetFrameworks>
     <DocumentationFile>JoeScan.Pinchot.xml</DocumentationFile>
     <NoWarn>1701;1702;CA1303</NoWarn>
@@ -13,7 +14,7 @@
     <Description>
       Pinchot is the API for interfacing with JS-50 model scan heads. For Pinchot documentation and examples, and for the JCam API for JS-25 model scan heads, please see api.joescan.com.
     </Description>
-    <PackageTags>JoeScan;JS-50;JS-50-WX</PackageTags>
+    <PackageTags>JoeScan;JS-50;JS-50 WX;JS-50 WSC</PackageTags>
     <Copyright>JoeScan 2020</Copyright>
     <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
@@ -26,10 +27,6 @@
   <Import Project="..\JoeScan.Pinchot.Shared\JoeScan.Pinchot.Shared.projitems" Label="Shared" />
 
   <ItemGroup>
-    <PackageReference Include="GitVersionTask" Version="5.3.7">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
     <PackageReference Include="Microsoft.CodeAnalysis.FxCopAnalyzers" Version="3.3.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

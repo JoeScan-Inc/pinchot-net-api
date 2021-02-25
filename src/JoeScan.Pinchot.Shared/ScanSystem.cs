@@ -155,16 +155,16 @@ namespace JoeScan.Pinchot
         #region Public Methods
 
         /// <summary>
-        /// Creates a <see cref="Pinchot.ScanHead"/> and adds it to <see cref="ScanHeads"/>.
+        /// Creates a <see cref="ScanHead"/> and adds it to <see cref="ScanHeads"/>.
         /// </summary>
         /// <param name="serialNumber">The serial number of the physical scan head.</param>
         /// <param name="id">The ID to associate with the <see cref="ScanHead"/>.</param>
-        /// <returns>The created <see cref="Pinchot.ScanHead"/>.</returns>
+        /// <returns>The created <see cref="ScanHead"/>.</returns>
         /// <remarks>
         /// <see cref="ScanSystem"/> must not be connected. Verify <see cref="IsConnected"/>
         /// is `false` and/or call <see cref="Disconnect"/> before calling ths method.
         /// </remarks>
-        /// <exception cref="System.Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `true`.<br/>
         /// -or-<br/>
         /// <see cref="IsScanning"/> is `true`.
@@ -178,12 +178,12 @@ namespace JoeScan.Pinchot
         {
             if (IsConnected)
             {
-                throw new Exception("Can not add scan head while connected.");
+                throw new InvalidOperationException("Can not add scan head while connected.");
             }
 
             if (IsScanning)
             {
-                throw new Exception("Can not add scan head while scanning.");
+                throw new InvalidOperationException("Can not add scan head while scanning.");
             }
 
             if (scanHeads.ContainsKey(serialNumber))
@@ -203,7 +203,7 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Gets a <see cref="Pinchot.ScanHead"/> by serial number.
+        /// Gets a <see cref="ScanHead"/> by serial number.
         /// </summary>
         /// <param name="serialNumber">The serial number of the desired <see cref="ScanHead"/>.</param>
         /// <returns>The <see cref="ScanHead"/>.</returns>
@@ -221,7 +221,7 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Gets a <see cref="Pinchot.ScanHead"/> by ID.
+        /// Gets a <see cref="ScanHead"/> by ID.
         /// </summary>
         /// <param name="id">The ID of the desired <see cref="ScanHead"/>.</param>
         /// <returns>The <see cref="ScanHead"/>.</returns>
@@ -244,7 +244,7 @@ namespace JoeScan.Pinchot
         /// <param name="connectTimeout">The connection timeout period.</param>
         /// <returns>A <see cref="IReadOnlyCollection{T}"/> of <see cref="Pinchot.ScanHead"/>s
         /// that did not successfully connect.</returns>
-        /// <exception cref="System.Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="ScanHeads"/> does not contain any <see cref="ScanHead"/>s.<br/>
         /// -or-<br/>
         /// <see cref="ScanHeads"/> does not contain any enabled <see cref="ScanHead"/>s.<br/>
@@ -258,25 +258,25 @@ namespace JoeScan.Pinchot
             if (!ScanHeads.Any())
             {
                 var msg = "No scan heads in scan system.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (!ScanHeads.Any(s => s.Enabled))
             {
                 var msg = "No scan heads are enabled.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (IsConnected)
             {
                 var msg = "Already connected.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (IsScanning)
             {
                 var msg = "Already scanning.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             // Create new session id and connect to all heads 
@@ -287,7 +287,7 @@ namespace JoeScan.Pinchot
             {
                 if (!scanHead.ValidateConfiguration())
                 {
-                    throw new Exception("Configuration validation failed for scan head " + scanHead.ID + ".");
+                    throw new InvalidOperationException("Configuration validation failed for scan head " + scanHead.ID + ".");
                 }
 
                 scanHead.StartSenderReceiver(sessionId, ConnectionType);
@@ -303,7 +303,7 @@ namespace JoeScan.Pinchot
                 var errs = mismatches.Select(mm =>
                     $"Scan head {mm.SerialNumber} failed to connect: {mm.VersionMismatchReason}");
                 var err = string.Join("\n", errs);
-                throw new Exception(err);
+                throw new InvalidOperationException(err);
             }
 
             var connectedHeads = ScanHeads.Where(s => connectedHeadIPs.Contains(s.IPAddress)).ToList();
@@ -314,7 +314,7 @@ namespace JoeScan.Pinchot
 
             // Wait for scan heads to configure the window and report max scan rate
             // via status message.
-            Thread.Sleep(1000);
+            Thread.Sleep(250);
 
             cancellationTokenSource = new CancellationTokenSource();
             token = cancellationTokenSource.Token;
@@ -330,7 +330,7 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Disconnects all <see cref="ScanHeads"/> from their associated physical scan heads.
         /// </summary>
-        /// <exception cref="System.Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `false`.<br/>
         /// -or-<br/>
         /// <see cref="IsScanning"/> is `true`.
@@ -339,12 +339,12 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                throw new Exception("Attempting to disconnect when not connected.");
+                throw new InvalidOperationException("Attempting to disconnect when not connected.");
             }
 
             if (IsScanning)
             {
-                throw new Exception("Can not disconnect while still scanning.");
+                throw new InvalidOperationException("Can not disconnect while still scanning.");
             }
 
             // send connect packet to all heads
@@ -372,7 +372,7 @@ namespace JoeScan.Pinchot
         /// </remarks>
         /// <param name="rate">The scan rate in Hz.</param>
         /// <param name="dataFormat">The <see cref="DataFormat"/>.</param>
-        /// <exception cref="Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `false`.<br/>
         /// -or-<br/>
         /// <see cref="IsScanning"/> is `true`.
@@ -385,13 +385,13 @@ namespace JoeScan.Pinchot
             if (!IsConnected)
             {
                 var msg = "Attempting to start scanning when not connected.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (IsScanning)
             {
                 var msg = "Attempting to start scanning while already scanning.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (rate > GetMaxScanRate())
@@ -417,7 +417,7 @@ namespace JoeScan.Pinchot
         /// is called. <see cref="Profile"/>s will remain in the <see cref="ScanHead"/> profile buffers until they are either consumed
         /// or <see cref="StartScanning"/> is called.
         /// </remarks>
-        /// <exception cref="Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="IsScanning"/> is `false`.
         /// </exception>
         public void StopScanning()
@@ -425,7 +425,7 @@ namespace JoeScan.Pinchot
             if (!IsScanning)
             {
                 var msg = "Attempting to stop scanning when not scanning.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             foreach (var scanHead in ScanHeads)
@@ -440,7 +440,7 @@ namespace JoeScan.Pinchot
         /// Gets the maximum scan rate allowed by the <see cref="ScanSystem"/> in Hz.
         /// </summary>
         /// <returns>The maximum scan rate allowed by the <see cref="ScanSystem"/> in Hz.</returns>
-        /// <exception cref="Exception">
+        /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `false`.
         /// </exception>
         public double GetMaxScanRate()
@@ -448,7 +448,7 @@ namespace JoeScan.Pinchot
             if (!IsConnected)
             {
                 var msg = "Attempting to get max scan rate when not connected.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             double maxLaserOnTime = 0;
@@ -479,12 +479,12 @@ namespace JoeScan.Pinchot
         {
             if (IsScanning)
             {
-                throw new Exception("Can not change column range while scanning");
+                throw new InvalidOperationException("Can not change column range while scanning");
             }
 
             if (startColumn == endColumn || startColumn > endColumn || startColumn < 0 || endColumn > 1455)
             {
-                throw new Exception("Illegal value for start column or end column.");
+                throw new ArgumentOutOfRangeException("Illegal value for start column or end column.");
             }
 
             StartColumn = startColumn;
@@ -496,20 +496,20 @@ namespace JoeScan.Pinchot
             if (!IsConnected)
             {
                 var msg = "Not connected.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (IsScanning)
             {
                 var msg = "Already scanning.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             // TODO-CCP: need to determine the bounds
             if (rate < 0.02 || rate > 5000)
             {
                 var msg = $"Scan rate {rate} outside of allowed range. Must be between 0.02 and 5000 Hz";
-                throw new Exception(msg);
+                throw new ArgumentOutOfRangeException(msg);
             }
 
             foreach (var scanHead in ScanHeads)
@@ -525,20 +525,20 @@ namespace JoeScan.Pinchot
             if (!IsConnected)
             {
                 var msg = "Not connected.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             if (IsScanning)
             {
                 var msg = "Already scanning.";
-                throw new Exception(msg);
+                throw new InvalidOperationException(msg);
             }
 
             // TODO-CCP: need to determine the bounds
             if (rate < 0.02 || rate > 5000)
             {
                 var msg = $"Scan rate {rate} outside of allowed range. Must be between 0.02 and 5000 Hz";
-                throw new Exception(msg);
+                throw new ArgumentOutOfRangeException(msg);
             }
 
             foreach (var scanHead in ScanHeads)
@@ -550,48 +550,48 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Removes a <see cref="Pinchot.ScanHead"/> object from use by serial number.
+        /// Removes a <see cref="ScanHead"/> object from use by serial number.
         /// </summary>
         /// <param name="serialNumber">The serial number of the scan head to remove.</param>
         internal void RemoveScanHead(uint serialNumber)
         {
             if (IsConnected)
             {
-                throw new Exception("Can not remove scan head while connected.");
+                throw new InvalidOperationException("Can not remove scan head while connected.");
             }
 
             if (IsScanning)
             {
-                throw new Exception("Can not remove scan head while scanning.");
+                throw new InvalidOperationException("Can not remove scan head while scanning.");
             }
 
             if (!scanHeads.ContainsKey(serialNumber))
             {
-                throw new Exception($"Scan head with serial number \"{serialNumber}\" is not managed.");
+                throw new ArgumentException($"Scan head with serial number \"{serialNumber}\" is not managed.");
             }
 
             RemoveScanHead(scanHeads[serialNumber]);
         }
 
         /// <summary>
-        /// Removes a <see cref="Pinchot.ScanHead"/> object from use by reference.
+        /// Removes a <see cref="ScanHead"/> object from use by reference.
         /// </summary>
         /// <param name="scanHead">An object reference to the scan head to remove.</param>
         internal void RemoveScanHead(ScanHead scanHead)
         {
             if (IsConnected)
             {
-                throw new Exception("Can not remove scan head while connected.");
+                throw new InvalidOperationException("Can not remove scan head while connected.");
             }
 
             if (IsScanning)
             {
-                throw new Exception("Can not remove scan head while scanning.");
+                throw new InvalidOperationException("Can not remove scan head while scanning.");
             }
 
             if (!scanHeads.Values.Contains(scanHead))
             {
-                throw new Exception($"Scan head is not managed.");
+                throw new ArgumentException($"Scan head is not managed.");
             }
 
             var s = scanHeads.FirstOrDefault(q => q.Value == scanHead);
@@ -603,18 +603,18 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Removes all created <see cref="Pinchot.ScanHead"/> objects from use.
+        /// Removes all created <see cref="ScanHead"/> objects from use.
         /// </summary>
         internal void RemoveAllScanHeads()
         {
             if (IsConnected)
             {
-                throw new Exception("Can not remove scan head while connected.");
+                throw new InvalidOperationException("Can not remove scan head while connected.");
             }
 
             if (IsScanning)
             {
-                throw new Exception("Can not remove scan head while scanning.");
+                throw new InvalidOperationException("Can not remove scan head while scanning.");
             }
 
             foreach (var scanHead in ScanHeads)

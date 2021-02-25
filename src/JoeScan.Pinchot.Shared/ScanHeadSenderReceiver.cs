@@ -276,6 +276,8 @@ namespace JoeScan.Pinchot
                             if (outgoingPackets.TryDequeue(out byte[] toSend))
                             {
                                 sendUdpClient.Send(toSend, toSend.Length, scanHeadDataIpEndPoint);
+                                // HACK: slight delay needed to make sure Windows doesn't drop UDP packets?
+                                Thread.Sleep(1);
                             }
                         }
                     }

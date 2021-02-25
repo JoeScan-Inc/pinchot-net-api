@@ -21,8 +21,8 @@ namespace JoeScan.Pinchot
         JS50WX = 1,
 
         /// <summary>
-        /// JS-50 SC
+        /// JS-50 WSC
         /// </summary>
-        JS50SC = 2,
+        JS50WSC = 2,
     }
 }
