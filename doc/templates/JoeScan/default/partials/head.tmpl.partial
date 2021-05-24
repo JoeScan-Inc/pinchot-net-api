@@ -17,4 +17,6 @@
   {{#_noindex}}<meta name="searchOption" content="noindex">{{/_noindex}}
   {{#_enableSearch}}<meta property="docfx:rel" content="{{_rel}}">{{/_enableSearch}}
   {{#_enableNewTab}}<meta property="docfx:newtab" content="true">{{/_enableNewTab}}
+
+  <script src="http://assets.adobedtm.com/175f7caa2b90/f06b38193d2f/launch-1328160fdb65.min.js" async></script>
 </head>

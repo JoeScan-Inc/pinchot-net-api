@@ -347,7 +347,6 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Can not disconnect while still scanning.");
             }
 
-            // send connect packet to all heads
             foreach (var s in ScanHeads)
             {
                 s.Disconnect();
@@ -535,9 +534,9 @@ namespace JoeScan.Pinchot
             }
 
             // TODO-CCP: need to determine the bounds
-            if (rate < 0.02 || rate > 5000)
+            if (rate < 0.02 || rate > 20)
             {
-                var msg = $"Scan rate {rate} outside of allowed range. Must be between 0.02 and 5000 Hz";
+                var msg = $"Scan rate {rate} outside of allowed range. Must be between 0.02 and 20 Hz";
                 throw new ArgumentOutOfRangeException(msg);
             }
 

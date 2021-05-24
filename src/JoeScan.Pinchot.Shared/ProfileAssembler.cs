@@ -6,8 +6,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
-using System.Net;
 
 namespace JoeScan.Pinchot
 {
@@ -44,26 +42,43 @@ namespace JoeScan.Pinchot
 
         #endregion
 
-        internal void AssembleProfiles(ProfileFragments fragments)
+        private Profile CreateNewProfile(DataPacket seedPacket)
         {
             var p = new Profile
             {
-                // copy common data from the first fragment
-                ScanHeadID = (uint)fragments[0].ScanHead,
-                Camera = fragments[0].Camera,
-                Laser = fragments[0].Laser,
-                Timestamp = fragments[0].Timestamp,
-                LaserOnTime = fragments[0].LaserOnTime,
-                ExposureTime = fragments[0].ExposureTime,
+                ScanHeadID = (uint)seedPacket.ScanHead,
+                Camera = seedPacket.Camera,
+                Laser = seedPacket.Laser,
+                Timestamp = seedPacket.Timestamp,
+                LaserOnTime = seedPacket.LaserOnTime,
+                ExposureTime = seedPacket.ExposureTime,
                 AllDataFormat = dataFormat,
-                EncoderValues = new Dictionary<Encoder, long>(fragments[0].NumEncoderVals)
+                EncoderValues = new Dictionary<Encoder, long>(seedPacket.NumEncoderVals)
             };
 
-            // copy encoder vals
-            for (int i = 0; i < fragments[0].NumEncoderVals; i++)
+            for (int i = 0; i < seedPacket.NumEncoderVals; i++)
             {
-                p.EncoderValues[(Encoder)i] = fragments[0].EncoderVals[i];
+                p.EncoderValues[(Encoder)i] = seedPacket.EncoderVals[i];
             }
+
+            if (seedPacket.Contents.HasFlag(DataType.IM))
+            {
+                p.Image = new byte[1456 * 1088];
+                p.CameraCoordinates = new Point2D[Globals.RawProfileDataLength];
+            }
+
+            if (seedPacket.Contents.HasFlag(DataType.SP))
+            {
+                p.CameraCoordinates = new Point2D[Globals.RawProfileDataLength];
+            }
+
+            return p;
+        }
+
+        internal void AssembleProfiles(ProfileFragments fragments)
+        {
+            var seedPacket = fragments[0];
+            var p = CreateNewProfile(seedPacket);
 
             if (rawPointsArrayIndex >= RawPointsArrayCapacity)
             {
@@ -75,19 +90,8 @@ namespace JoeScan.Pinchot
                 Globals.RawProfileDataLength);
             var rawPointsSpan = p.RawPointsMemory.Span;
             rawPointsSpan.Fill(new Point2D(double.NaN, double.NaN, Globals.ProfileDataInvalidBrightness));
-            int validPointCount = 0;
 
-            Point2D[] cameraCoords = null;
-
-            if ((fragments[0].Contents & DataType.IM) > 0)
-            {
-                // we have image data
-                p.Image = new byte[1456 * 1088];
-            }
-
-            // helpers local
-            int fragmentsCount = fragments.Count;
-            var tr = alignmentParameters[fragments[0].Camera];
+            var tr = alignmentParameters[seedPacket.Camera];
             double sinRoll = tr.SinRoll;
             double cosRoll = tr.CosRoll;
             double cosYaw = tr.CosYaw;
@@ -97,124 +101,105 @@ namespace JoeScan.Pinchot
             double xYCoefficient = sinRoll / 1000;
             double yXCoefficient = cosYaw * sinRoll / 1000;
             double yYCoefficient = cosRoll / 1000;
-            foreach (var dt in DataTypeValues.DataTypes)
+
+            foreach (var currentFragment in fragments)
             {
-                for (int fragmentNumber = 0; fragmentNumber < fragmentsCount; fragmentNumber++)
+                var dataTypes = currentFragment.Contents;
+                short startCol = currentFragment.StartColumn;
+                int partNum = currentFragment.PartNum;
+                int totalParts = currentFragment.NumParts;
+                byte[] currentFragmentRaw = currentFragment.Raw;
+
+                foreach (var dt in dataTypes.GetFlags())
                 {
-                    if ((fragments[0].Contents & dt) != 0)
+                    var layout = currentFragment.FragmentLayouts[dt];
+                    int numVals = layout.numVals;
+                    int step = layout.step;
+                    int srcIdx = layout.offset;
+
+                    int inc = totalParts * step;
+                    int destIdx = startCol + partNum * step;
+
+                    switch (dt)
                     {
-                        var currentFragment = fragments[fragmentNumber];
-                        short startCol = fragments[0].StartColumn;
-                        int numVals = currentFragment.FragmentLayouts[dt].numVals;
-                        int step = currentFragment.FragmentLayouts[dt].step;
-                        int sourcePos = currentFragment.FragmentLayouts[dt].offset;
-                        byte[] currentFragmentRaw = currentFragment.Raw;
+                        case DataType.LM:
+                            for (int j = 0; j < numVals; j++)
+                            {
+                                rawPointsSpan[destIdx].Brightness = currentFragmentRaw[srcIdx];
+                                ++srcIdx;
+                                destIdx += inc;
+                            }
 
-                        switch (dt)
-                        {
-                            case DataType.LM:
-                                for (int j = 0; j < numVals; j++)
+                            break;
+                        case DataType.XY:
+                            for (int j = 0; j < numVals; j++)
+                            {
+                                short xraw = (short)(currentFragmentRaw[srcIdx + 1] | (currentFragmentRaw[srcIdx] << 8));
+                                short yraw = (short)(currentFragmentRaw[srcIdx + 3] | (currentFragmentRaw[srcIdx + 2] << 8));
+                                srcIdx += 4;
+
+                                if (xraw != Globals.ProfileDataInvalidXY && yraw != Globals.ProfileDataInvalidXY)
                                 {
-                                    int destPos = startCol + (j * fragmentsCount + fragmentNumber) * step;
-                                    rawPointsSpan[destPos].Brightness = currentFragmentRaw[sourcePos];
-                                    sourcePos++;
+                                    p.ValidPointCount++;
+                                    rawPointsSpan[destIdx].X = xraw * xXCoefficient - yraw * xYCoefficient + shiftX;
+                                    rawPointsSpan[destIdx].Y = xraw * yXCoefficient + yraw * yYCoefficient + shiftY;
                                 }
 
-                                break;
-                            case DataType.XY:
-                                for (int j = 0; j < numVals; j++)
+                                destIdx += inc;
+                            }
+
+                            break;
+                        case DataType.PW:
+                            break;
+                        case DataType.VR:
+                            break;
+                        case DataType.SP:
+                            for (int j = 0; j < numVals; j++)
+                            {
+                                short rowPixel = (short)(currentFragmentRaw[srcIdx + 1] | (currentFragmentRaw[srcIdx] << 8));
+                                srcIdx += 2;
+
+                                p.CameraCoordinates[destIdx] = new Point2D(rowPixel, destIdx, rawPointsSpan[destIdx].Brightness);
+                                destIdx += inc;
+                            }
+
+                            break;
+                        case DataType.IM:
+                            // TODO: Adapt to use SP type
+                            // last packet is subpixel data corresponding to laser line
+                            if (partNum == totalParts - 1)
+                            {
+                                for (int i = 0; i < 1456; i++)
                                 {
-                                    int destPos =
-                                        startCol + (j * fragmentsCount + fragmentNumber) *
-                                        step; // for looking up brightness
-                                    short xraw = (short)(currentFragmentRaw[sourcePos + 1] |
-                                                       currentFragmentRaw[sourcePos] << 8);
-                                    short yraw = (short)(currentFragmentRaw[sourcePos + 3] |
-                                                       currentFragmentRaw[sourcePos + 2] << 8);
-                                    // check for invalid value for pt here
-                                    if (xraw != Globals.ProfileDataInvalidXY && yraw != Globals.ProfileDataInvalidXY)
+                                    // TODO: SP data doesn't get sent in network order
+                                    int rowPixel = currentFragmentRaw[srcIdx + 1] << 8 | currentFragmentRaw[srcIdx];
+                                    int brightness = currentFragmentRaw[srcIdx + 3] << 8 | currentFragmentRaw[srcIdx + 2];
+                                    srcIdx += 4;
+
+                                    if (brightness < 0x8000)
                                     {
-                                        validPointCount++;
-                                        rawPointsSpan[destPos].X =
-                                            xraw * xXCoefficient - yraw * xYCoefficient + shiftX;
-                                        rawPointsSpan[destPos].Y =
-                                            xraw * yXCoefficient + yraw * yYCoefficient + shiftY;
+                                        brightness /= 7;
+                                    }
+                                    else
+                                    {
+                                        rowPixel = Globals.ProfileDataInvalidSubpixel;
+                                        brightness = Globals.ProfileDataInvalidBrightness;
                                     }
 
-                                    sourcePos += 4;
+                                    p.CameraCoordinates[i] = new Point2D(rowPixel, i, brightness);
                                 }
-
                                 break;
-                            case DataType.PW:
-                                break;
-                            case DataType.VR:
-                                break;
-                            case DataType.SP:
-                                for (int j = 0; j < numVals; j++)
-                                {
-                                    if (cameraCoords == null)
-                                    {
-                                        cameraCoords = new Point2D[Globals.RawProfileDataLength];
-                                    }
+                            }
 
-                                    int col = startCol + (j * fragmentsCount + fragmentNumber) * step;
-                                    short rowPixel =
-                                        IPAddress.NetworkToHostOrder(BitConverter.ToInt16(currentFragment.Raw,
-                                            sourcePos));
-                                    cameraCoords[col] = (new Point2D(rowPixel, col, rawPointsSpan[col].Brightness));
-                                    sourcePos += 2;
-                                }
+                            int pos = partNum * 4 * 1456;
+                            Array.Copy(currentFragmentRaw, srcIdx, (Array)p.Image, pos, numVals);
 
-                                break;
-                            case DataType.IM:
-                                //TODO:: Adapt to use SP type
-                                if (fragmentNumber == fragmentsCount - 1)
-                                {
-                                    if (cameraCoords == null)
-                                    {
-                                        cameraCoords = new Point2D[Globals.RawProfileDataLength];
-                                    }
-
-                                    for (int i = 0; i < 1456; i++)
-                                    {
-                                        int rowPixel = BitConverter.ToInt16(currentFragment.Raw, sourcePos);
-                                        sourcePos += 2;
-                                        int brightness = BitConverter.ToInt16(currentFragment.Raw, sourcePos);
-                                        sourcePos += 2;
-                                        if (brightness < 0x8000)
-                                        {
-                                            brightness /= 7;
-                                        }
-                                        else
-                                        {
-                                            rowPixel = Globals.ProfileDataInvalidSubpixel;
-                                            brightness = 0;
-                                        }
-                                        cameraCoords[i] = new Point2D(rowPixel, i, brightness);
-                                    }
-                                    break;
-                                }
-
-                                for (int j = 0; j < numVals; j++)
-                                {
-                                    int pos = fragmentNumber * 4 * 1456 + j;
-                                    p.Image[pos] = currentFragment.Raw[sourcePos++];
-                                }
-
-                                break;
-                            default:
-                                break;
-                        }
+                            break;
+                        default:
+                            break;
                     }
                 }
             }
-
-            if (cameraCoords != null)
-            {
-                p.CameraCoordinates = cameraCoords.ToArray();
-            }
-
-            p.ValidPointCount = validPointCount;
 
             if (!profiles.TryAdd(p))
             {

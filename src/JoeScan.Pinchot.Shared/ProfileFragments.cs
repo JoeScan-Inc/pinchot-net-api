@@ -54,5 +54,10 @@ namespace JoeScan.Pinchot
             Timestamp = default;
             Complete = default;
         }
+
+        public IEnumerator<DataPacket> GetEnumerator()
+        {
+            return rawPackets.GetEnumerator();
+        }
     }
 }

@@ -82,8 +82,9 @@ namespace JoeScan.Pinchot
 
         internal IPEndPoint LocalReceiveIpEndPoint => (IPEndPoint)receiveUdpClient.Client.LocalEndPoint;
 
-        internal bool IsConnected => lastReceivedPacketTime != long.MinValue &&
-                                     (timeBase.ElapsedMilliseconds - lastReceivedPacketTime) < ConnectionCheckTime;
+        internal bool IsConnected => isRunning
+            && lastReceivedPacketTime != long.MinValue
+            && (timeBase.ElapsedMilliseconds - lastReceivedPacketTime) < ConnectionCheckTime;
 
         internal bool ProfileBufferOverflowed => profileAssembler?.ProfileBufferOverflowed ?? false;
 
@@ -202,10 +203,6 @@ namespace JoeScan.Pinchot
         internal void Disconnect()
         {
             Send(new DisconnectPacket().Raw);
-        }
-
-        internal void Stop()
-        {
             isRunning = false;
         }
 
@@ -380,7 +377,6 @@ namespace JoeScan.Pinchot
                                     // Versions are not compatible, try to send a disconnect before bailing
                                     CreateIPEndPoint(from);
                                     Disconnect();
-                                    Stop();
                                     break;
                                 }
 

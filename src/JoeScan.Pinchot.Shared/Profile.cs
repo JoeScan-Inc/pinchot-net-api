@@ -19,7 +19,7 @@ namespace JoeScan.Pinchot
     /// timestamp, encoder values, and other properties. Methods for retrieving only valid <see cref="Point2D"/>
     /// data are also provided.
     /// </remarks>
-    public class Profile
+    public class Profile : ICloneable
     {
         #region Private Fields
 
@@ -155,6 +155,15 @@ namespace JoeScan.Pinchot
 
                 validPoints[i++] = point;
             }
+        }
+
+        /// <summary>
+        /// <see cref="Profile"/> implements <see cref="ICloneable"/>.
+        /// </summary>
+        /// <returns>A shallow copy of the <see cref="Profile"/> object.</returns>
+        public object Clone()
+        {
+            return MemberwiseClone();
         }
 
         #endregion

@@ -12,7 +12,11 @@
     <Compile Include="$(MSBuildThisFileDirectory)AlignmentParameters.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)CameraImage.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadChannelAlignment.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ScanHeadDefectMapList.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadLaserCameraExposureTimes.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ScanHeadMapping.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ScanHeadMappleList.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ScanHeadRestClient.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadTemperatureSensors.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadPowerSensors.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ScanHeadUuids.cs" />

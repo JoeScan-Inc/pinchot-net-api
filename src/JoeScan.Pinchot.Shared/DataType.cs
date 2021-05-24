@@ -28,9 +28,28 @@ namespace JoeScan.Pinchot
         internal static readonly IEnumerable<DataType> DataTypes = Enum.GetValues(typeof(DataType)).Cast<DataType>();
     }
 
-    internal static class DataSizes
+    internal static class DataTypeExtensions
     {
-        public static int GetSizeFor(DataType t)
+        internal static int BitsSet(this DataType t)
+        {
+            int count = 0;
+            while (t > 0)
+            {
+                t &= (t - 1);
+                count++;
+            }
+
+            return count;
+        }
+
+        internal static IEnumerable<DataType> GetFlags(this DataType input)
+        {
+            foreach (DataType value in DataTypeValues.DataTypes)
+                if (input.HasFlag(value))
+                    yield return value;
+        }
+
+        internal static int Size(this DataType t)
         {
             switch (t)
             {
@@ -46,21 +65,6 @@ namespace JoeScan.Pinchot
                 default:
                     return 1;
             }
-        }
-    }
-
-    internal static class EnumExtensions
-    {
-        internal static int BitsSet(this DataType t)
-        {
-            int count = 0;
-            while (t > 0)
-            {
-                t &= (t - 1);
-                count++;
-            }
-
-            return count;
         }
     }
 }

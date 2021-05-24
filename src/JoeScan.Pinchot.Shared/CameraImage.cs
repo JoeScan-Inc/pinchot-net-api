@@ -100,12 +100,22 @@ namespace JoeScan.Pinchot
 
         #region Lifecycle
 
-        internal CameraImage()
+        internal CameraImage(Profile profile)
         {
+            ScanHeadID = profile.ScanHeadID;
+            Camera = profile.Camera;
+            DataFormat = profile.DataFormat;
+            EncoderValues = profile.EncoderValues;
+            Laser = profile.Laser;
+            LaserOnTime = profile.LaserOnTime;
+            ExposureTime = profile.ExposureTime;
+            Data = profile.Image;
+            Width = Globals.CameraImageDataMaxWidth;
+            Height = Globals.CameraImageDataMaxHeight;
+            Timestamp = profile.Timestamp;
         }
 
         internal CameraImage(BinaryReader reader)
-            : this()
         {
             if (reader.ReadInt16() != ProfileMagic)
             {

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <TargetFrameworks>netcoreapp3.1;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>net5.0;netcoreapp3.1;netstandard2.0</TargetFrameworks>
     <DocumentationFile>JoeScan.Pinchot.xml</DocumentationFile>
     <NoWarn>1701;1702;CA1303</NoWarn>
     <Owners>JoeScan Inc.</Owners>
@@ -22,17 +22,14 @@
     <PackageIcon>JoeScanDeveloperIcon128.png</PackageIcon>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
   </PropertyGroup>
 
   <Import Project="..\JoeScan.Pinchot.Shared\JoeScan.Pinchot.Shared.projitems" Label="Shared" />
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.FxCopAnalyzers" Version="3.3.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
-    <PackageReference Include="RestSharp" Version="106.11.4" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <PackageReference Include="RestSharp" Version="106.11.7" />
     <PackageReference Include="System.Memory" Version="4.5.4" />
     <None Include="JoeScanDeveloperIcon128.png" Pack="true" PackagePath="\" />
   </ItemGroup>

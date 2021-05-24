@@ -4,7 +4,6 @@
 // root for license information.
 
 using Newtonsoft.Json;
-using RestSharp;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -22,7 +21,7 @@ namespace JoeScan.Pinchot
     /// and methods for configuration, status retrieval, and profile data retrieval. A <see cref="ScanHead"/>
     /// must belong to a <see cref="ScanSystem"/> and is created using <see cref="ScanSystem.CreateScanHead"/>.
     /// </remarks>
-    public class ScanHead : IDisposable
+    public partial class ScanHead : IDisposable
     {
         #region Private Fields
 
@@ -225,7 +224,9 @@ namespace JoeScan.Pinchot
         protected virtual void Dispose(bool disposing)
         {
             if (disposed)
+            {
                 return;
+            }
 
             if (disposing)
             {
@@ -426,18 +427,35 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                var msg = "Not connected.";
+                string msg = "Not connected.";
                 throw new InvalidOperationException(msg);
             }
 
             if (scanSystem.IsScanning)
             {
-                var msg = "Scan system is scanning.";
+                string msg = "Scan system is scanning.";
                 throw new InvalidOperationException(msg);
             }
 
-            var images = GetCameraImages(1, enableLasers, CancellationToken.None);
+            var images = GetCameraImages(1, enableLasers, CancellationToken.None, ignoreIncompleteProfiles: true);
             return images[camera].First();
+        }
+
+        /// <summary>
+        /// Empties the internal client side software buffers used to store profiles received from a given
+        /// scan head.
+        ///
+        /// Under normal scanning conditions where the application consumes profiles as they become available,
+        /// this function will not be needed. Its use is to be found in cases where the application fails to
+        /// consume profiles after some time and the number of buffered profiles, as indicated by the
+        /// <see cref="NumberOfProfilesAvailable"/> property, becomes more than the application can consume
+        /// and only the most recent scan data is desired.
+        /// </summary>
+        public void ClearProfiles()
+        {
+            while (Profiles.TryTake(out var _))
+            {
+            }
         }
 
         #endregion
@@ -446,7 +464,10 @@ namespace JoeScan.Pinchot
 
         internal void StartSenderReceiver(byte sessionId, ConnectionType connType = ConnectionType.Normal)
         {
-            if (!Enabled) return;
+            if (!Enabled)
+            {
+                return;
+            }
 
             senderReceiver?.Dispose();
             senderReceiver = new ScanHeadSenderReceiver(this, CommStatsEnabled);
@@ -456,7 +477,10 @@ namespace JoeScan.Pinchot
 
         internal void StartScanning(double scanRate, AllDataFormat dataFormat)
         {
-            if (!Enabled) return;
+            if (!Enabled)
+            {
+                return;
+            }
 
             if (scanRate > Status.MaxScanRate)
             {
@@ -471,24 +495,32 @@ namespace JoeScan.Pinchot
 
         internal void StopScanning()
         {
-            if (!Enabled) return;
+            if (!Enabled)
+            {
+                return;
+            }
 
             senderReceiver.ClearScanRequests();
         }
 
         internal void SetWindow()
         {
-            if (!Enabled) return;
+            if (!Enabled)
+            {
+                return;
+            }
 
             senderReceiver.SetWindow();
         }
 
         internal void Disconnect()
         {
-            if (!Enabled) return;
+            if (!Enabled)
+            {
+                return;
+            }
 
             senderReceiver.Disconnect();
-            senderReceiver.Stop();
         }
 
         /// <summary>
@@ -532,8 +564,8 @@ namespace JoeScan.Pinchot
             this.scanSystem = scanSystem;
         }
 
-        internal IDictionary<Camera, IList<CameraImage>> GetCameraImages(int numberOfImages, bool enableLasers,
-            CancellationToken token)
+        internal IDictionary<Camera, IList<CameraImage>> GetCameraImages(uint numberOfImages, bool enableLasers,
+            CancellationToken token, bool ignoreIncompleteProfiles = false, Action<CameraImage> imageCallback = null)
         {
             var images = new Dictionary<Camera, IList<CameraImage>>();
             for (var camera = Camera.CameraA; (int)camera < Status.NumValidCameras; camera++)
@@ -543,13 +575,13 @@ namespace JoeScan.Pinchot
 
             if (!IsConnected)
             {
-                var msg = "Not connected.";
+                string msg = "Not connected.";
                 throw new InvalidOperationException(msg);
             }
 
             if (scanSystem.IsScanning)
             {
-                var msg = "Scan system is scanning.";
+                string msg = "Scan system is scanning.";
                 throw new InvalidOperationException(msg);
             }
 
@@ -557,13 +589,14 @@ namespace JoeScan.Pinchot
 
             if (!enableLasers)
             {
+                // TODO: Can the lasers actually be turned off fully?
                 Configuration.SetLaserOnTime(15.0, 15.0, 15.0);
             }
             else
             {
-                var laserMin = Configuration.MinLaserOnTime;
-                var laserDefault = Configuration.DefaultLaserOnTime;
-                var laserMax = Configuration.MaxLaserOnTime;
+                double laserMin = Configuration.MinLaserOnTime;
+                double laserDefault = Configuration.DefaultLaserOnTime;
+                double laserMax = Configuration.MaxLaserOnTime;
 
                 if (laserMin > Configuration.MinCameraExposureTime)
                 {
@@ -583,10 +616,10 @@ namespace JoeScan.Pinchot
                 Configuration.SetLaserOnTime(laserMin, laserDefault, laserMax);
             }
 
-            var rateHz = 1.0 / (Status.NumValidCameras * Configuration.MaxCameraExposureTime * 1e-6);
-            if (rateHz > 2)
+            double rateHz = 1.0 / (Status.NumValidCameras * Configuration.MaxCameraExposureTime * 1e-6);
+            if (rateHz > 5)
             {
-                rateHz = 2;
+                rateHz = 5;
             }
 
             StartScanning(rateHz, AllDataFormat.Image);
@@ -597,23 +630,20 @@ namespace JoeScan.Pinchot
                 {
                     var profile = TakeNextProfile(token);
 
-                    if (images[profile.Camera].Count >= numberOfImages) continue;
-
-                    var image = new CameraImage()
+                    if (images[profile.Camera].Count >= numberOfImages)
                     {
-                        ScanHeadID = profile.ScanHeadID,
-                        Camera = profile.Camera,
-                        DataFormat = profile.DataFormat,
-                        EncoderValues = profile.EncoderValues,
-                        Laser = profile.Laser,
-                        LaserOnTime = profile.LaserOnTime,
-                        ExposureTime = profile.ExposureTime,
-                        Data = profile.Image,
-                        Width = Globals.CameraImageDataMaxWidth,
-                        Height = Globals.CameraImageDataMaxHeight,
-                        Timestamp = profile.Timestamp
-                    };
+                        images[profile.Camera].RemoveAt(0);
+                    }
 
+                    if (profile.Image == null
+                        || (ignoreIncompleteProfiles
+                        && profile.Image.Any(p => p == 0)))
+                    {
+                        continue;
+                    }
+
+                    var image = new CameraImage(profile);
+                    imageCallback?.Invoke(image);
                     images[profile.Camera].Add(image);
                 }
             }
@@ -621,75 +651,13 @@ namespace JoeScan.Pinchot
             {
                 StopScanning();
                 Configure(userConfig);
-                throw new OperationCanceledException();
+                throw;
             }
 
             StopScanning();
             Configure(userConfig);
 
             return images;
-        }
-
-        internal T PerformRestGetRequest<T>(string endpoint)
-        {
-            var restClient = new RestClient($"http://{IPAddress}:8080/");
-            restClient.UseJson();
-            var req = new RestRequest(endpoint);
-            req.AddHeader("Content-Type", "application/json");
-            var response = restClient.Execute(req);
-            if (!response.IsSuccessful)
-            {
-                throw new WebException($"REST GET request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
-            }
-
-            return JsonConvert.DeserializeObject<T>(response.Content);
-        }
-
-        internal void PerformRestPostRequest(string endpoint, object body)
-        {
-            var restClient = new RestClient($"http://{IPAddress}:8080/");
-            restClient.UseJson();
-            var req = new RestRequest(endpoint)
-            {
-                Method = Method.POST
-            };
-            req.AddHeader("Content-Type", "application/json");
-            req.AddJsonBody(body);
-            var response = restClient.Execute(req);
-            if (!response.IsSuccessful)
-            {
-                throw new WebException($"REST POST request to {IPAddress} was unsuccessful. {response.ErrorMessage}");
-            }
-        }
-
-        internal ScanHeadTemperatureSensors GetTemperatureData()
-        {
-            return PerformRestGetRequest<ScanHeadTemperatureSensors>("sensors/temperature");
-        }
-
-        internal ScanHeadPowerSensors GetPowerData()
-        {
-            return PerformRestGetRequest<ScanHeadPowerSensors>("sensors/power");
-        }
-
-        internal ScanHeadChannelAlignment GetChannelAlignmentData()
-        {
-            return PerformRestGetRequest<ScanHeadChannelAlignment>("tests/channel-alignment");
-        }
-
-        internal ScanHeadLaserCameraExposureTimes GetExposureTimes()
-        {
-            return PerformRestGetRequest<ScanHeadLaserCameraExposureTimes>("config/exposure-times");
-        }
-
-        internal void SetCameraLaserExposureTimes(uint cameraStart, uint cameraEnd, uint laserStart, uint laserEnd)
-        {
-            PerformRestPostRequest("config/exposure-times", new { cameraStart, cameraEnd, laserStart, laserEnd });
-        }
-
-        internal ScanHeadUuids GetUuids()
-        {
-            return PerformRestGetRequest<ScanHeadUuids>("uuids");
         }
 
         #endregion
@@ -710,13 +678,6 @@ namespace JoeScan.Pinchot
                 BadPackets = CommStats.BadPackets,
                 GoodPackets = CommStats.GoodPackets
             });
-        }
-
-        private void ClearProfiles()
-        {
-            while (Profiles.TryTake(out var _))
-            {
-            }
         }
 
         #endregion

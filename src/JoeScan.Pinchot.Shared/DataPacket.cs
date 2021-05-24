@@ -78,45 +78,42 @@ namespace JoeScan.Pinchot
             FragmentLayouts = new Dictionary<DataType, FragmentLayout>();
             int offset = 0;
             int dataOffset = 32 + 4 + NumEncoderVals * 8 + NumContentTypes * 2;
-            foreach (DataType dt in DataTypeValues.DataTypes)
+            foreach (var dt in Contents.GetFlags())
             {
-                if ((Contents & dt) != 0)
+                short step = IPAddress.NetworkToHostOrder(BitConverter.ToInt16(packet, 32 + 4 + offset));
+
+                int payloadsize;
+                int numVals;
+                if (dt != DataType.IM)
                 {
-                    short step = IPAddress.NetworkToHostOrder(BitConverter.ToInt16(packet, 32 + 4 + offset));
-
-                    int payloadsize;
-                    int numVals;
-                    if (dt != DataType.IM)
+                    int numCols = EndColumn - StartColumn + 1;
+                    numVals = numCols / (NumParts * step);
+                    // If the data doesn't divide evenly into the DataPackets, each DataPacket starting
+                    // from the first will have 1 additional value of the type in question.
+                    if (((numCols / step) % NumParts) > PartNum)
                     {
-                        int numCols = EndColumn - StartColumn + 1;
-                        numVals = numCols / (NumParts * step);
-                        // If the data doesn't divide evenly into the DataPackets, each DataPacket starting
-                        // from the first will have 1 additional value of the type in question.
-                        if (((numCols / step) % NumParts) > PartNum)
-                        {
-                            numVals++;
-                        }
-
-                        payloadsize = DataSizes.GetSizeFor(dt) * numVals;
-                    }
-                    else
-                    {
-                        numVals = PayloadLength;
-                        payloadsize = PayloadLength;
+                        numVals++;
                     }
 
-                    var fl = new FragmentLayout()
-                    {
-                        step = step,
-                        numVals = numVals,
-                        payloadsize = payloadsize,
-                        offset = dataOffset
-                    };
-
-                    dataOffset += fl.payloadsize;
-                    FragmentLayouts[dt] = fl;
-                    offset += 2;
+                    payloadsize = dt.Size() * numVals;
                 }
+                else
+                {
+                    numVals = PayloadLength;
+                    payloadsize = PayloadLength;
+                }
+
+                var fl = new FragmentLayout()
+                {
+                    step = step,
+                    numVals = numVals,
+                    payloadsize = payloadsize,
+                    offset = dataOffset
+                };
+
+                dataOffset += fl.payloadsize;
+                FragmentLayouts[dt] = fl;
+                offset += 2;
             }
         }
 

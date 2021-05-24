@@ -51,5 +51,10 @@ namespace JoeScan.Pinchot
 
             return network1.Equals(network2);
         }
+
+        internal static bool IsIPv4LinkLocal(this IPAddress address)
+        {
+            return address.ToString().StartsWith("169.254", StringComparison.Ordinal);
+        }
     }
 }
