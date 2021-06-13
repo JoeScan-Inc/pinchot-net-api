@@ -127,7 +127,13 @@ namespace JoeScan.Pinchot
         /// <returns>A <see cref="IEnumerable{Point2D}"/> of the valid <see cref="Point2D"/>s in the <see cref="Profile"/>.</returns>
         public IEnumerable<Point2D> GetValidXYPoints()
         {
-            return RawPoints.ToArray().Where(q => !double.IsNaN(q.Y));
+            foreach(var p in RawPoints)
+            {
+                if (!double.IsNaN(p.Y))
+                {
+                    yield return p;
+                }                
+            }
         }
 
         /// <summary>
