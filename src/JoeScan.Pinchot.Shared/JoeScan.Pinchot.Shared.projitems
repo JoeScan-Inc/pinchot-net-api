@@ -44,7 +44,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)VersionCompatibilityException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Globals.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)EventExtensions.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FixedSizeQueue.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)IpAddressExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)NetworkByteUnpacker.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)BroadcastConnectPacket.cs" />

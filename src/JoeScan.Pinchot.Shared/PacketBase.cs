@@ -11,17 +11,11 @@ namespace JoeScan.Pinchot
     {
         protected byte[] raw;
 
-        internal ScanPacketType Command
-        {
-            get { return (ScanPacketType)raw[3]; }
-        }
+        internal ScanPacketType Command => (ScanPacketType)raw[3];
 
-        internal byte[] Raw
-        {
-            get { return raw; }
-        }
+        internal byte[] Raw => raw;
 
-        internal IPAddress From { get; set; }
+        internal IPAddress From { get; }
 
         protected PacketBase(byte[] raw, IPAddress from)
         {

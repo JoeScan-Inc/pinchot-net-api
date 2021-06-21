@@ -67,7 +67,7 @@ namespace JoeScan.Pinchot
         /// Set during initialization of a new instance of a <see cref="AlignmentParameters"/> object.
         /// </summary>
         [JsonProperty(nameof(ShiftX))]
-        internal double ShiftX { get; private set; }
+        internal double ShiftX { get; }
 
         /// <summary>
         /// Gets the translation along the Y axis in the mill coordinate system in inches.
@@ -102,18 +102,18 @@ namespace JoeScan.Pinchot
         /// <param name="shiftY">The shift along the Y axis in the mill coordinate system in inches.</param>
         /// <param name="orientation">The <see cref="ScanHeadOrientation"/>.</param>
         /// <exception cref="ArgumentException">
-        /// One or more arguments are <see cref="Double.NaN"/><br/>
+        /// One or more arguments are <see cref="double.NaN"/><br/>
         /// -or-<br/>
-        /// One or more arguments are <see cref="Double.NegativeInfinity"/> or <see cref="Double.PositiveInfinity"/>
+        /// One or more arguments are <see cref="double.NegativeInfinity"/> or <see cref="double.PositiveInfinity"/>
         /// </exception>
         internal AlignmentParameters(double roll, double shiftX, double shiftY, ScanHeadOrientation orientation)
         {
-            if (Double.IsNaN(roll) || Double.IsNaN(shiftX) || Double.IsNaN(shiftY))
+            if (double.IsNaN(roll) || double.IsNaN(shiftX) || double.IsNaN(shiftY))
             {
                 throw new ArgumentException("One or more arguments are Double.NaN.");
             }
 
-            if (Double.IsInfinity(roll) || Double.IsInfinity(shiftX) || Double.IsInfinity(shiftY))
+            if (double.IsInfinity(roll) || double.IsInfinity(shiftX) || double.IsInfinity(shiftY))
             {
                 throw new ArgumentException(
                     "One or more arguments are Double.NegativeInfinity or Double.PositiveInfinity.");
@@ -150,8 +150,8 @@ namespace JoeScan.Pinchot
         internal Point2D CameraToMill(double x, double y, int brightness)
         {
             return new Point2D(
-                x * CosYaw * CosRoll - y * SinRoll + ShiftX,
-                x * CosYaw * SinRoll + y * CosRoll + ShiftY,
+                (x * CosYaw * CosRoll) - (y * SinRoll) + ShiftX,
+                (x * CosYaw * SinRoll) + (y * CosRoll) + ShiftY,
                 brightness);
         }
 
@@ -164,12 +164,12 @@ namespace JoeScan.Pinchot
         /// <returns>The transformed point.</returns>
         internal Point2D MillToCamera(double x, double y, int brightness)
         {
-            var cosNegRoll = Math.Cos(-Roll * Rho);
-            var sinNegRoll = Math.Sin(-Roll * Rho);
-            var cosNegYaw = Math.Cos(-yaw * Rho);
+            double cosNegRoll = Math.Cos(-Roll * Rho);
+            double sinNegRoll = Math.Sin(-Roll * Rho);
+            double cosNegYaw = Math.Cos(-yaw * Rho);
             return new Point2D(
-                (x - ShiftX) * cosNegYaw * cosNegRoll - (y - ShiftY) * cosNegYaw * sinNegRoll,
-                (x - ShiftX) * sinNegRoll + (y - ShiftY) * cosNegRoll,
+                ((x - ShiftX) * cosNegYaw * cosNegRoll) - ((y - ShiftY) * cosNegYaw * sinNegRoll),
+                ((x - ShiftX) * sinNegRoll) + ((y - ShiftY) * cosNegRoll),
                 brightness);
         }
 

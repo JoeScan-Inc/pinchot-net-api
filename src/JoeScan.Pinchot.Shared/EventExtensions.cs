@@ -20,13 +20,12 @@ namespace JoeScan.Pinchot
         {
             object retVal = null;
 
-            MulticastDelegate threadSafeMulticastDelegate = multicastDelegate;
+            var threadSafeMulticastDelegate = multicastDelegate;
             if (threadSafeMulticastDelegate != null)
             {
-                foreach (Delegate d in threadSafeMulticastDelegate.GetInvocationList())
+                foreach (var d in threadSafeMulticastDelegate.GetInvocationList())
                 {
-                    var synchronizeInvoke = d.Target as ISynchronizeInvoke;
-                    if ((synchronizeInvoke != null) && synchronizeInvoke.InvokeRequired)
+                    if ((d.Target is ISynchronizeInvoke synchronizeInvoke) && synchronizeInvoke.InvokeRequired)
                     {
                         retVal = synchronizeInvoke.EndInvoke(synchronizeInvoke.BeginInvoke(d, new[] { sender, e }));
                     }

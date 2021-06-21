@@ -118,7 +118,7 @@ namespace JoeScan.Pinchot
                     int srcIdx = layout.offset;
 
                     int inc = totalParts * step;
-                    int destIdx = startCol + partNum * step;
+                    int destIdx = startCol + (partNum * step);
 
                     switch (dt)
                     {
@@ -129,7 +129,6 @@ namespace JoeScan.Pinchot
                                 ++srcIdx;
                                 destIdx += inc;
                             }
-
                             break;
                         case DataType.XY:
                             for (int j = 0; j < numVals; j++)
@@ -141,17 +140,12 @@ namespace JoeScan.Pinchot
                                 if (xraw != Globals.ProfileDataInvalidXY && yraw != Globals.ProfileDataInvalidXY)
                                 {
                                     p.ValidPointCount++;
-                                    rawPointsSpan[destIdx].X = xraw * xXCoefficient - yraw * xYCoefficient + shiftX;
-                                    rawPointsSpan[destIdx].Y = xraw * yXCoefficient + yraw * yYCoefficient + shiftY;
+                                    rawPointsSpan[destIdx].X = (xraw * xXCoefficient) - (yraw * xYCoefficient) + shiftX;
+                                    rawPointsSpan[destIdx].Y = (xraw * yXCoefficient) + (yraw * yYCoefficient) + shiftY;
                                 }
 
                                 destIdx += inc;
                             }
-
-                            break;
-                        case DataType.PW:
-                            break;
-                        case DataType.VR:
                             break;
                         case DataType.SP:
                             for (int j = 0; j < numVals; j++)
@@ -162,7 +156,6 @@ namespace JoeScan.Pinchot
                                 p.CameraCoordinates[destIdx] = new Point2D(rowPixel, destIdx, rawPointsSpan[destIdx].Brightness);
                                 destIdx += inc;
                             }
-
                             break;
                         case DataType.IM:
                             // TODO: Adapt to use SP type
@@ -190,12 +183,8 @@ namespace JoeScan.Pinchot
                                 }
                                 break;
                             }
-
                             int pos = partNum * 4 * 1456;
                             Array.Copy(currentFragmentRaw, srcIdx, (Array)p.Image, pos, numVals);
-
-                            break;
-                        default:
                             break;
                     }
                 }

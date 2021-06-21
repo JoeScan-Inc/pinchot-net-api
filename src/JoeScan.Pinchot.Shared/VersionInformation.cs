@@ -34,7 +34,7 @@ namespace JoeScan.Pinchot
                     return version.ToString();
                 }
 
-                var splits = hashAttribute.InformationalVersion.Split('-');
+                string[] splits = hashAttribute.InformationalVersion.Split('-');
                 if (splits.Length > 1)
                 {
                     // If there is pre-release data (denoted by a hyphen after the patch number)

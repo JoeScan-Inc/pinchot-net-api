@@ -13,10 +13,9 @@ namespace JoeScan.Pinchot
     {
         internal static string GetErrorReason(ScanHeadVersionInformation version)
         {
-            var scanHeadVersion = $"{version.Major}.{version.Minor}.{version.Patch}";
-            var apiVersion = $"{VersionInformation.Major}.{VersionInformation.Minor}.{VersionInformation.Patch}";
-            var err = $"Scan head version {scanHeadVersion} is not compatible with API version {apiVersion}";
-            return err;
+            string scanHeadVersion = $"{version.Major}.{version.Minor}.{version.Patch}";
+            string apiVersion = $"{VersionInformation.Major}.{VersionInformation.Minor}.{VersionInformation.Patch}";
+            return $"Scan head version {scanHeadVersion} is not compatible with API version {apiVersion}";
         }
 
         internal VersionCompatibilityException()

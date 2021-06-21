@@ -96,10 +96,7 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal IList<Point2D> CameraCoordinates { get; set; }
 
-        internal int SourceID
-        {
-            get { return (int)ScanHeadID << 3 | (int)Camera << 2 | (int)Laser; }
-        }
+        internal int SourceID => (int)ScanHeadID << 3 | (int)Camera << 2 | (int)Laser;
 
         internal AllDataFormat AllDataFormat { get; set; }
 
@@ -148,10 +145,13 @@ namespace JoeScan.Pinchot
                     nameof(validPoints));
             }
 
-            var i = 0;
+            int i = 0;
             foreach (var point in RawPoints)
             {
-                if (double.IsNaN(point.Y)) continue;
+                if (double.IsNaN(point.Y))
+                {
+                    continue;
+                }
 
                 validPoints[i++] = point;
             }
@@ -182,7 +182,7 @@ namespace JoeScan.Pinchot
             Camera = (Camera)reader.ReadInt32();
             Laser = (Laser)reader.ReadInt32();
             Timestamp = reader.ReadInt64();
-            var numberOfEncoders = reader.ReadInt32();
+            int numberOfEncoders = reader.ReadInt32();
             EncoderValues = new Dictionary<Encoder, long>(numberOfEncoders);
             for (int i = 0; i < numberOfEncoders; i++)
             {
@@ -190,28 +190,28 @@ namespace JoeScan.Pinchot
             }
 
             LaserOnTime = reader.ReadInt32();
-            var numberPoints = reader.ReadInt32();
+            int numberPoints = reader.ReadInt32();
             var rawPointsArray = new Point2D[numberPoints];
-            for (var i = 0; i < numberPoints; i++)
+            for (int i = 0; i < numberPoints; i++)
             {
-                var x = reader.ReadDouble();
-                var y = reader.ReadDouble();
-                var brightness = reader.ReadInt32();
+                double x = reader.ReadDouble();
+                double y = reader.ReadDouble();
+                int brightness = reader.ReadInt32();
                 rawPointsArray[i] = new Point2D(x, y, brightness);
             }
 
             RawPointsMemory = new Memory<Point2D>(rawPointsArray);
-            var numSubpixelValues = reader.ReadInt32();
+            int numSubpixelValues = reader.ReadInt32();
             CameraCoordinates = new Point2D[numSubpixelValues];
             for (int i = 0; i < numSubpixelValues; i++)
             {
-                var x = reader.ReadDouble();
-                var y = reader.ReadDouble();
-                var brightness = reader.ReadInt32();
+                double x = reader.ReadDouble();
+                double y = reader.ReadDouble();
+                int brightness = reader.ReadInt32();
                 CameraCoordinates[i] = new Point2D(x, y, brightness);
             }
 
-            ValidPointCount = this.GetValidXYPoints().Count();
+            ValidPointCount = GetValidXYPoints().Count();
         }
 
         internal void WriteToBinaryWriter(BinaryWriter bw)
@@ -222,7 +222,7 @@ namespace JoeScan.Pinchot
             bw.Write((int)Laser);
             bw.Write(Timestamp);
             bw.Write(EncoderValues.Count);
-            foreach (var val in EncoderValues.Values)
+            foreach (long val in EncoderValues.Values)
             {
                 bw.Write(val);
             }
@@ -261,7 +261,7 @@ namespace JoeScan.Pinchot
             bw.Write((int)Laser);
             bw.Write(Timestamp);
             bw.Write(EncoderValues.Count);
-            foreach (var val in EncoderValues.Values)
+            foreach (long val in EncoderValues.Values)
             {
                 bw.Write(val);
             }

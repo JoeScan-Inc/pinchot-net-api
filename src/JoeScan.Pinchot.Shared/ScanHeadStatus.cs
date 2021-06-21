@@ -134,55 +134,51 @@ namespace JoeScan.Pinchot
         /// API should instead use <see cref="ScanSystem.GetMaxScanRate"/>.
         /// </summary>
         /// <value>The highest scan rate possible with the current configuration in Hz.</value>
-        internal int MaxScanRate { get; private set; }
+        internal int MaxScanRate { get; }
 
         /// <summary>
         /// Reserved for future use.
         /// </summary>
-        internal uint Reserved0 { get; private set; }
+        internal uint Reserved0 { get; }
 
         /// <summary>
         /// Reserved for future use.
         /// </summary>
-        internal uint Reserved1 { get; private set; }
+        internal uint Reserved1 { get; }
 
         /// <summary>
         /// Reserved for future use.
         /// </summary>
-        internal uint Reserved2 { get; private set; }
+        internal uint Reserved2 { get; }
 
         /// <summary>
         /// Reserved for future use.
         /// </summary>
-        internal uint Reserved3 { get; private set; }
+        internal uint Reserved3 { get; }
 
         /// <summary>
         /// Reserved for future use.
         /// </summary>
-        internal uint Reserved4 { get; private set; }
+        internal uint Reserved4 { get; }
 
         /// <summary>
         /// Reserved for future use.
         /// </summary>
-        internal uint Reserved5 { get; private set; }
+        internal uint Reserved5 { get; }
 
         /// <summary>
         /// Reserved for future use.
         /// </summary>
-        internal uint Reserved6 { get; private set; }
+        internal uint Reserved6 { get; }
 
         /// <summary>
         /// Reserved for future use.
         /// </summary>
-        internal uint Reserved7 { get; private set; }
+        internal uint Reserved7 { get; }
 
         #endregion
 
         #region Lifecycle
-
-        internal ScanHeadStatus()
-        {
-        }
 
         /// <summary>
         /// Deserialize a scan head status packet from a raw byte stream.
@@ -223,7 +219,9 @@ namespace JoeScan.Pinchot
             // Static Data
             ScanHeadSerialNumber = NetworkByteUnpacker.ExtractIntFromNetworkBuffer(buf, ref idx);
             MaxScanRate = NetworkByteUnpacker.ExtractIntFromNetworkBuffer(buf, ref idx);
+#pragma warning disable CS0618 // Type or member is obsolete
             ScanHeadIPAddress = NetworkByteUnpacker.ExtractIPAddressFromNetworkBuffer(buf, ref idx);
+#pragma warning restore CS0618 // Type or member is obsolete
             ClientIPAddress = NetworkByteUnpacker.ExtractIPAddressFromNetworkBuffer(buf, ref idx);
             ClientUdpPort = NetworkByteUnpacker.ExtractUShortFromNetworkBuffer(buf, ref idx);
             ScanSyncID = NetworkByteUnpacker.ExtractUShortFromNetworkBuffer(buf, ref idx);
@@ -246,16 +244,16 @@ namespace JoeScan.Pinchot
             EncoderValues = new Dictionary<Encoder, long>(NumValidEncoders);
             foreach (int i in Enumerable.Range(0, NumValidEncoders))
             {
-                Encoder encoder = (Encoder)Enum.ToObject(typeof(Encoder), i);
-                var encoderValue = NetworkByteUnpacker.ExtractLongFromNetworkBuffer(buf, ref idx);
+                var encoder = (Encoder)Enum.ToObject(typeof(Encoder), i);
+                long encoderValue = NetworkByteUnpacker.ExtractLongFromNetworkBuffer(buf, ref idx);
                 EncoderValues.Add(encoder, encoderValue);
             }
 
             PixelsInWindow = new Dictionary<Camera, int>(NumValidCameras);
             foreach (int i in Enumerable.Range(0, NumValidCameras))
             {
-                Camera camera = (Camera)Enum.ToObject(typeof(Camera), i);
-                var pixels = NetworkByteUnpacker.ExtractIntFromNetworkBuffer(buf, ref idx);
+                var camera = (Camera)Enum.ToObject(typeof(Camera), i);
+                int pixels = NetworkByteUnpacker.ExtractIntFromNetworkBuffer(buf, ref idx);
                 PixelsInWindow.Add(camera, pixels);
             }
 
@@ -263,7 +261,7 @@ namespace JoeScan.Pinchot
             foreach (int i in Enumerable.Range(0, NumValidCameras))
             {
                 var temperatureSensor = (TemperatureSensor)Enum.ToObject(typeof(TemperatureSensor), i);
-                var temperature = NetworkByteUnpacker.ExtractFloatFromNetworkBuffer(buf, ref idx);
+                float temperature = NetworkByteUnpacker.ExtractFloatFromNetworkBuffer(buf, ref idx);
                 Temperatures.Add(temperatureSensor, temperature);
             }
         }

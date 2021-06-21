@@ -43,29 +43,29 @@ namespace JoeScan.Pinchot
         /// <returns>The created <see cref="ScanWindow"/>.</returns>
         /// <seealso cref="ScanHead.SetWindow(ScanWindow)"/>
         /// <exception cref="ArgumentException">
-        /// One or more arguments are <see cref="Double.NaN"/><br/>
+        /// One or more arguments are <see cref="double.NaN"/><br/>
         /// -or-<br/>
-        /// One or more arguments are <see cref="Double.NegativeInfinity"/> or <see cref="Double.PositiveInfinity"/><br/>
+        /// One or more arguments are <see cref="double.NegativeInfinity"/> or <see cref="double.PositiveInfinity"/><br/>
         /// -or-<br/>
         /// <paramref name="windowTop"/> is less than or equal to <paramref name="windowBottom"/><br/>
         /// -or-<br/>
-        /// <paramref name="windowRight"/> is less than or equal to <paramref name="windowLeft"/> 
+        /// <paramref name="windowRight"/> is less than or equal to <paramref name="windowLeft"/>
         /// </exception>
         public static ScanWindow CreateScanWindowRectangular(double windowTop, double windowBottom, double windowLeft,
             double windowRight)
         {
-            if (Double.IsNaN(windowTop) ||
-                Double.IsNaN(windowBottom) ||
-                Double.IsNaN(windowLeft) ||
-                Double.IsNaN(windowRight))
+            if (double.IsNaN(windowTop) ||
+                double.IsNaN(windowBottom) ||
+                double.IsNaN(windowLeft) ||
+                double.IsNaN(windowRight))
             {
                 throw new ArgumentException("One or more arguments are Double.NaN.");
             }
 
-            if (Double.IsInfinity(windowTop) ||
-                Double.IsInfinity(windowBottom) ||
-                Double.IsInfinity(windowLeft) ||
-                Double.IsInfinity(windowRight))
+            if (double.IsInfinity(windowTop) ||
+                double.IsInfinity(windowBottom) ||
+                double.IsInfinity(windowLeft) ||
+                double.IsInfinity(windowRight))
             {
                 throw new ArgumentException(
                     "One or more arguments are Double.NegativeInfinity or Double.PositiveInfinity.");

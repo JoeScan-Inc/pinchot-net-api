@@ -23,10 +23,7 @@ namespace JoeScan.Pinchot
 
         internal DataPacket this[int key] => rawPackets[key];
 
-        internal ProfileFragments()
-        {
-            rawPackets = new List<DataPacket>(10);
-        }
+        internal ProfileFragments() => rawPackets = new List<DataPacket>(10);
 
         internal ProfileFragments(DataPacket data, long timeCreated)
             : this()

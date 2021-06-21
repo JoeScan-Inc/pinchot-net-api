@@ -12,11 +12,7 @@ namespace JoeScan.Pinchot
     /// A data point consisting of X and Y spatial coordinates and a brightness value.
     /// </summary>
     [DebuggerDisplay("X: {X} Y: {Y} Brightness: {Brightness}")]
-#pragma warning disable CS0659 // Type overrides Object.Equals(object o) but does not override Object.GetHashCode()
-#pragma warning disable CS0661 // Type defines operator == or operator != but does not override Object.GetHashCode()
     public struct Point2D : IEquatable<Point2D>
-#pragma warning restore CS0659 // Type overrides Object.Equals(object o) but does not override Object.GetHashCode()
-#pragma warning restore CS0661 // Type defines operator == or operator != but does not override Object.GetHashCode()
     {
         #region Public Properties
 
@@ -74,10 +70,7 @@ namespace JoeScan.Pinchot
         /// <param name="pointB">A <see cref="Point2D"/> to compare.</param>
         /// <returns>`true` if the two <see cref="Point2D"/> objects have coordinates within 1/10,000th of an inch
         /// and have the same brightness.</returns>
-        public static bool operator ==(Point2D pointA, Point2D pointB)
-        {
-            return pointA.Equals(pointB);
-        }
+        public static bool operator ==(Point2D pointA, Point2D pointB) => pointA.Equals(pointB);
 
         /// <summary>
         /// Compares two <see cref="Point2D"/> objects. The result specifies whether the two <see cref="Point2D"/> objects have
@@ -87,10 +80,7 @@ namespace JoeScan.Pinchot
         /// <param name="pointB">A <see cref="Point2D"/> to compare.</param>
         /// <returns>`true` if the two <see cref="Point2D"/> objects have coordinates that are not within 1/10,000th
         /// of an inch or do not have the same brightness.</returns>
-        public static bool operator !=(Point2D pointA, Point2D pointB)
-        {
-            return !pointA.Equals(pointB);
-        }
+        public static bool operator !=(Point2D pointA, Point2D pointB) => !pointA.Equals(pointB);
 
         /// <summary>
         /// Specifies whether this <see cref="Point2D"/> instance contains the same coordinates within 1/10,000th of an inch
@@ -101,7 +91,10 @@ namespace JoeScan.Pinchot
         /// within 1/10,000th of an inch and the same brightness as this <see cref="Point2D"/> instance.</returns>
         public override bool Equals(object point)
         {
-            if (!(point is Point2D)) return false;
+            if (!(point is Point2D))
+            {
+                return false;
+            }
 
             return Equals((Point2D)point);
         }
@@ -139,22 +132,38 @@ namespace JoeScan.Pinchot
 
         internal double Distance(Point2D p2)
         {
-            return Math.Sqrt((X - p2.X) * (X - p2.X) + (Y - p2.Y) * (Y - p2.Y));
+            return Math.Sqrt(((X - p2.X) * (X - p2.X)) + ((Y - p2.Y) * (Y - p2.Y)));
         }
 
         internal double Distance(double x, double y)
         {
-            return Math.Sqrt((X - x) * (X - x) + (Y - y) * (Y - y));
+            return Math.Sqrt(((X - x) * (X - x)) + ((Y - y) * (Y - y)));
         }
 
         internal double DistanceSq(double x, double y)
         {
-            return (X - x) * (X - x) + (Y - y) * (Y - y);
+            return ((X - x) * (X - x)) + ((Y - y) * (Y - y));
         }
 
         internal double DistanceSq(Point2D p2)
         {
-            return (X - p2.X) * (X - p2.X) + (Y - p2.Y) * (Y - p2.Y);
+            return ((X - p2.X) * (X - p2.X)) + ((Y - p2.Y) * (Y - p2.Y));
+        }
+
+        /// <summary>
+        /// Returns the hash code for this instance.
+        /// </summary>
+        /// <returns>A 32-bit signed integer hash code.</returns>
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = 17;
+                hash = (hash * 23) + X.GetHashCode();
+                hash = (hash * 23) + Y.GetHashCode();
+                hash = (hash * 23) + Brightness.GetHashCode();
+                return hash;
+            }
         }
 
         #endregion
