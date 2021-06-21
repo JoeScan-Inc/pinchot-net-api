@@ -33,7 +33,7 @@ namespace JoeScan.Pinchot
                 raw[7] = clientIpAddress.GetAddressBytes()[3];
             }
 
-            var p = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(port));
+            byte[] p = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(port));
             raw[8] = p[0];
             raw[9] = p[1];
             raw[10] = sessionId;
@@ -45,25 +45,13 @@ namespace JoeScan.Pinchot
             raw[16] = BitConverter.GetBytes(serialNumber)[0];
         }
 
-        internal IPAddress ClientAddress
-        {
-            get { return new IPAddress(raw.Skip(4).Take(4).ToArray()); }
-        }
+        internal IPAddress ClientAddress => new IPAddress(raw.Skip(4).Take(4).ToArray());
 
-        internal short ClientPort
-        {
-            get { return IPAddress.NetworkToHostOrder(BitConverter.ToInt16(raw, 8)); }
-        }
+        internal short ClientPort => IPAddress.NetworkToHostOrder(BitConverter.ToInt16(raw, 8));
 
-        internal byte Sequence
-        {
-            get { return raw[10]; }
-        }
+        internal byte Sequence => raw[10];
 
-        internal byte ScanHeadId
-        {
-            get { return raw[11]; }
-        }
+        internal byte ScanHeadId => raw[11];
 
         public override string ToString()
         {

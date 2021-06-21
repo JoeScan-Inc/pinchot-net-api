@@ -7,6 +7,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -75,7 +76,7 @@ namespace JoeScan.Pinchot
         /// </summary>
         /// <value>A value indicating whether the network connection to the physical scan head is established.</value>
         [JsonIgnore]
-        public bool IsConnected => senderReceiver != null && senderReceiver.IsConnected;
+        public bool IsConnected => senderReceiver?.IsConnected == true;
 
         /// <summary>
         /// Gets the most recent <see cref="ScanHeadStatus"/> received from the physical scan head.
@@ -141,7 +142,7 @@ namespace JoeScan.Pinchot
         /// transform the data from a camera based coordinate system to one based on
         /// mill placement. Read Only. Use SetAlignment to set all alignment values.
         /// </summary>
-        /// <seealso cref="SetAlignment(double, double, double, ScanHeadOrientation)"/> or 
+        /// <seealso cref="SetAlignment(double, double, double, ScanHeadOrientation)"/> or
         /// <seealso cref="SetAlignment(Camera, double, double, double, ScanHeadOrientation)"/>
         [JsonProperty(nameof(Alignment))]
         internal Dictionary<Camera, AlignmentParameters> Alignment
@@ -427,14 +428,12 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                string msg = "Not connected.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Not connected.");
             }
 
             if (scanSystem.IsScanning)
             {
-                string msg = "Scan system is scanning.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Scan system is scanning.");
             }
 
             var images = GetCameraImages(1, enableLasers, CancellationToken.None, ignoreIncompleteProfiles: true);
@@ -442,14 +441,17 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
+        /// <para>
         /// Empties the internal client side software buffers used to store profiles received from a given
         /// scan head.
-        ///
+        /// </para>
+        /// <para>
         /// Under normal scanning conditions where the application consumes profiles as they become available,
         /// this function will not be needed. Its use is to be found in cases where the application fails to
         /// consume profiles after some time and the number of buffered profiles, as indicated by the
         /// <see cref="NumberOfProfilesAvailable"/> property, becomes more than the application can consume
         /// and only the most recent scan data is desired.
+        /// </para>
         /// </summary>
         public void ClearProfiles()
         {
@@ -524,24 +526,6 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Performs a validation of the scan head's configuration to ensure there
-        /// are no conflicts. Note, this method is not currently implemented.
-        /// </summary>
-        /// <returns><c>true</c> if the configuration is valid, <c>false</c> otherwise.</returns>
-        /// <exception cref="NullReferenceException">
-        /// <see cref="Configuration"/> is `null`.
-        /// </exception>
-        internal bool ValidateConfiguration()
-        {
-            if (Configuration is null)
-            {
-                throw new NullReferenceException("Scan head configuration is null.");
-            }
-
-            return Configuration.Validate();
-        }
-
-        /// <summary>
         /// Sets the spatial transform parameters of the scan head in order to properly
         /// transform the data from a camera based coordinate system to one based on
         /// mill placement. Parameters are applied to all cameras.
@@ -575,14 +559,12 @@ namespace JoeScan.Pinchot
 
             if (!IsConnected)
             {
-                string msg = "Not connected.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Not connected.");
             }
 
             if (scanSystem.IsScanning)
             {
-                string msg = "Scan system is scanning.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Scan system is scanning.");
             }
 
             var userConfig = GetConfigurationClone();
@@ -624,11 +606,33 @@ namespace JoeScan.Pinchot
 
             StartScanning(rateHz, AllDataFormat.Image);
 
+            var timeout = TimeSpan.FromSeconds(10);
+            var stopwatch = Stopwatch.StartNew();
+
             try
             {
                 while (images.Any(keyValuePair => keyValuePair.Value.Count < numberOfImages))
                 {
-                    var profile = TakeNextProfile(token);
+                    // Check that images are being received for both cameras, this solves
+                    // the case where one camera is working but the other fails to get images
+                    if (stopwatch.IsRunning && stopwatch.Elapsed > timeout)
+                    {
+                        var imgsCount = images.Select(i => (i.Key, i.Value.Count));
+                        if (imgsCount.Any(ic => ic.Count == 0))
+                        {
+                            var zeroImgCameras = imgsCount.Where(ic => ic.Count == 0).Select(ic => ic.Key);
+                            string err = $"No valid images for: {string.Join(", ", zeroImgCameras)}";
+                            throw new ApplicationException(err);
+                        }
+
+                        // Stop checking since images are coming in from both cameras now
+                        stopwatch.Stop();
+                    }
+
+                    if (!TryTakeNextProfile(out var profile, timeout, token))
+                    {
+                        continue;
+                    }
 
                     if (images[profile.Camera].Count >= numberOfImages)
                     {
@@ -647,15 +651,11 @@ namespace JoeScan.Pinchot
                     images[profile.Camera].Add(image);
                 }
             }
-            catch (OperationCanceledException)
+            finally
             {
                 StopScanning();
                 Configure(userConfig);
-                throw;
             }
-
-            StopScanning();
-            Configure(userConfig);
 
             return images;
         }

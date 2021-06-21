@@ -12,20 +12,24 @@ namespace JoeScan.Pinchot
     [Flags]
     internal enum DataType : ushort
     {
-        LM = 0x1,  // Brightness Data (LM, for Luminosity)
-        XY = 0x2,  // XY data (XY)
-        PW = 0x4,  // Width Data (PW, for Peak Width)
-        VR = 0x8,  // 2nd Moment Data (VR, for Variance)
-        SP = 0x10, // camera coordinates
-        IM = 0x20  // Image data
+        Invalid = 0, // Invalid
+        LM = 1 << 0, // Brightness Data (LM, for Luminosity)
+        XY = 1 << 1, // XY data (XY)
+        PW = 1 << 2, // Width Data (PW, for Peak Width)
+        VR = 1 << 3, // 2nd Moment Data (VR, for Variance)
+        SP = 1 << 4, // camera coordinates
+        IM = 1 << 5  // Image data
     }
 
     /// <summary>
-    /// Use this class as a way to enumerate through all <see cref="DataType"/> values.
+    /// Use this class as a way to enumerate through all valid <see cref="DataType"/> values.
     /// </summary>
     internal static class DataTypeValues
     {
-        internal static readonly IEnumerable<DataType> DataTypes = Enum.GetValues(typeof(DataType)).Cast<DataType>();
+        internal static readonly IEnumerable<DataType> DataTypes =
+            Enum.GetValues(typeof(DataType))
+                .Cast<DataType>()
+                .Where(d => d != DataType.Invalid);
     }
 
     internal static class DataTypeExtensions
@@ -44,9 +48,13 @@ namespace JoeScan.Pinchot
 
         internal static IEnumerable<DataType> GetFlags(this DataType input)
         {
-            foreach (DataType value in DataTypeValues.DataTypes)
+            foreach (var value in DataTypeValues.DataTypes)
+            {
                 if (input.HasFlag(value))
+                {
                     yield return value;
+                }
+            }
         }
 
         internal static int Size(this DataType t)
@@ -62,8 +70,10 @@ namespace JoeScan.Pinchot
                 case DataType.PW:
                 case DataType.VR:
                     return 2;
+                case DataType.Invalid:
+                    throw new ArgumentException("Invalid data type", nameof(t));
                 default:
-                    return 1;
+                    throw new ArgumentException("Unknown data type", nameof(t));
             }
         }
     }

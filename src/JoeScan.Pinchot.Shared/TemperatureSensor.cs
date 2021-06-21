@@ -24,7 +24,7 @@ namespace JoeScan.Pinchot
         /// Motherboard temperature sensor.
         /// </summary>
         Motherboard,
-        
+
         /// <summary>
         /// Temperature for the Processor on SoC
         /// </summary>

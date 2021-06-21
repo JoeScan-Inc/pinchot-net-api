@@ -182,9 +182,8 @@ namespace JoeScan.Pinchot
             BadPacketsCount = 0L;
             evictedForTimeout = 0L;
             IncompleteProfilesReceivedCount = 0L;
-            var validNics = GetValidNics();
 
-            foreach (var possibleEndPoint in validNics)
+            foreach (var possibleEndPoint in GetValidNics())
             {
                 byte[] connectMessage = new BroadcastConnectPacket(sessionId,
                     (short)((IPEndPoint)receiveUdpClient.Client.LocalEndPoint).Port, scanHead.SerialNumber, connType,
@@ -422,9 +421,7 @@ namespace JoeScan.Pinchot
                     // Time to break out of receive loop
                     break;
                 }
-#pragma warning disable CA1031 // Do not catch general exception types
                 catch (Exception)
-#pragma warning restore CA1031 // Do not catch general exception types
                 {
                     BadPacketsCount++;
                 }
@@ -443,8 +440,7 @@ namespace JoeScan.Pinchot
         {
             var validNics = new List<IPAddress>();
             var interfaces = NetworkInterface.GetAllNetworkInterfaces()
-                .Where(i => i.OperationalStatus == OperationalStatus.Up
-                            && i.SupportsMulticast == true);
+                .Where(i => i.OperationalStatus == OperationalStatus.Up && i.SupportsMulticast);
 
             foreach (var ni in interfaces)
             {
@@ -468,7 +464,7 @@ namespace JoeScan.Pinchot
 
         private byte[] CreateWindowRectangularRequest(Camera camera)
         {
-            int size = 8 + 16 * scanHead.Window.WindowConstraints.Count;
+            int size = 8 + (16 * scanHead.Window.WindowConstraints.Count);
             byte[] raw = new byte[size];
             raw[0] = 0xFA;
             raw[1] = 0xCE;
@@ -490,19 +486,19 @@ namespace JoeScan.Pinchot
                 Array.Copy(
                     BitConverter.GetBytes(
                         IPAddress.HostToNetworkOrder((int)(p1.X * 1000.0))), 0, raw,
-                    8 + i * 16, 4);
+                    8 + (i * 16), 4);
                 Array.Copy(
                     BitConverter.GetBytes(
                         IPAddress.HostToNetworkOrder((int)(p1.Y * 1000.0))), 0, raw,
-                    12 + i * 16, 4);
+                    12 + (i * 16), 4);
                 Array.Copy(
                     BitConverter.GetBytes(
                         IPAddress.HostToNetworkOrder((int)(p2.X * 1000.0))), 0, raw,
-                    16 + i * 16, 4);
+                    16 + (i * 16), 4);
                 Array.Copy(
                     BitConverter.GetBytes(
                         IPAddress.HostToNetworkOrder((int)(p2.Y * 1000.0))), 0, raw,
-                    20 + i * 16, 4);
+                    20 + (i * 16), 4);
             }
 
             return raw;
@@ -513,7 +509,7 @@ namespace JoeScan.Pinchot
             // get the number of data types requested, the length of the steps array is a good proxy
             short[] stepArray = ResolutionPresets.GetStep(dataFormat);
 
-            byte[] raw = new byte[74 + stepArray.Length * 2];
+            byte[] raw = new byte[74 + (stepArray.Length * 2)];
             raw[0] = 0xFA;
             raw[1] = 0xCE;
             raw[2] = 12;
@@ -530,25 +526,25 @@ namespace JoeScan.Pinchot
             //raw[15] = 0x0; //Flags
 
             Array.Copy(
-                BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)(scanHead.Configuration.MinLaserOnTime))), 0,
+                BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)scanHead.Configuration.MinLaserOnTime)), 0,
                 raw, 16, 4);
             Array.Copy(
-                BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)(scanHead.Configuration.DefaultLaserOnTime))),
+                BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)scanHead.Configuration.DefaultLaserOnTime)),
                 0, raw, 20, 4);
             Array.Copy(
-                BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)(scanHead.Configuration.MaxLaserOnTime))), 0,
+                BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)scanHead.Configuration.MaxLaserOnTime)), 0,
                 raw, 24, 4);
 
             Array.Copy(
                 BitConverter.GetBytes(
-                    IPAddress.HostToNetworkOrder((int)(scanHead.Configuration.MinCameraExposureTime))), 0, raw, 28, 4);
+                    IPAddress.HostToNetworkOrder((int)scanHead.Configuration.MinCameraExposureTime)), 0, raw, 28, 4);
             Array.Copy(
                 BitConverter.GetBytes(
-                    IPAddress.HostToNetworkOrder((int)(scanHead.Configuration.DefaultCameraExposureTime))), 0, raw, 32,
+                    IPAddress.HostToNetworkOrder((int)scanHead.Configuration.DefaultCameraExposureTime)), 0, raw, 32,
                 4);
             Array.Copy(
                 BitConverter.GetBytes(
-                    IPAddress.HostToNetworkOrder((int)(scanHead.Configuration.MaxCameraExposureTime))), 0, raw, 36, 4);
+                    IPAddress.HostToNetworkOrder((int)scanHead.Configuration.MaxCameraExposureTime)), 0, raw, 36, 4);
 
             Array.Copy(
                 BitConverter.GetBytes(IPAddress.HostToNetworkOrder(scanHead.Configuration.LaserDetectionThreshold)), 0,
@@ -564,7 +560,7 @@ namespace JoeScan.Pinchot
             Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)(1000 / scanRate * 1000))), 0, raw, 56,
                 4);
             Array.Copy(
-                BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)(scanHead.Configuration.ScanPhaseOffset))), 0,
+                BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)scanHead.Configuration.ScanPhaseOffset)), 0,
                 raw, 60, 4);
             Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder(int.MaxValue)), 0, raw, 64, 4);
 
@@ -575,7 +571,7 @@ namespace JoeScan.Pinchot
             Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder(endColumn)), 0, raw, 72, 2);
             for (int i = 0; i < stepArray.Length; i++)
             {
-                Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder(stepArray[i])), 0, raw, 74 + 2 * i, 2);
+                Array.Copy(BitConverter.GetBytes(IPAddress.HostToNetworkOrder(stepArray[i])), 0, raw, 74 + (2 * i), 2);
             }
 
             return raw;

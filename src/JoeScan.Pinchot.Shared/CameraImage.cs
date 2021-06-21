@@ -127,7 +127,7 @@ namespace JoeScan.Pinchot
             Camera = (Camera)reader.ReadInt32();
             Laser = (Laser)reader.ReadInt32();
             Timestamp = reader.ReadInt64();
-            var numberOfEncoders = reader.ReadInt32();
+            int numberOfEncoders = reader.ReadInt32();
             EncoderValues = new Dictionary<Encoder, long>(numberOfEncoders);
             for (int i = 0; i < numberOfEncoders; i++)
             {
@@ -138,9 +138,9 @@ namespace JoeScan.Pinchot
             LaserOnTime = reader.ReadInt32();
             Width = reader.ReadInt32();
             Height = reader.ReadInt32();
-            var numberOfPixels = reader.ReadInt32();
+            int numberOfPixels = reader.ReadInt32();
             Data = new byte[numberOfPixels];
-            for (var i = 0; i < numberOfPixels; i++)
+            for (int i = 0; i < numberOfPixels; i++)
             {
                 Data[i] = reader.ReadByte();
             }
@@ -159,7 +159,7 @@ namespace JoeScan.Pinchot
             bw.Write((int)Laser);
             bw.Write(Timestamp);
             bw.Write(EncoderValues.Count);
-            foreach (var val in EncoderValues.Values)
+            foreach (long val in EncoderValues.Values)
             {
                 bw.Write(val);
             }
@@ -168,9 +168,9 @@ namespace JoeScan.Pinchot
             bw.Write((int)LaserOnTime);
             bw.Write(Width);
             bw.Write(Height);
-            var dataArray = Data.ToArray();
+            byte[] dataArray = Data.ToArray();
             bw.Write(dataArray.Length);
-            foreach (var pixel in dataArray)
+            foreach (byte pixel in dataArray)
             {
                 bw.Write(pixel);
             }

@@ -16,7 +16,9 @@ namespace JoeScan.Pinchot
             byte[] subnetMaskBytes = subnetMask.GetAddressBytes();
 
             if (ipAdressBytes.Length != subnetMaskBytes.Length)
+            {
                 throw new ArgumentException("Lengths of IP address and subnet mask do not match.");
+            }
 
             byte[] broadcastAddress = new byte[ipAdressBytes.Length];
             for (int i = 0; i < broadcastAddress.Length; i++)
@@ -33,7 +35,9 @@ namespace JoeScan.Pinchot
             byte[] subnetMaskBytes = subnetMask.GetAddressBytes();
 
             if (ipAdressBytes.Length != subnetMaskBytes.Length)
+            {
                 throw new ArgumentException("Lengths of IP address and subnet mask do not match.");
+            }
 
             byte[] broadcastAddress = new byte[ipAdressBytes.Length];
             for (int i = 0; i < broadcastAddress.Length; i++)
@@ -46,8 +50,8 @@ namespace JoeScan.Pinchot
 
         internal static bool IsInSameSubnet(this IPAddress address2, IPAddress address, IPAddress subnetMask)
         {
-            IPAddress network1 = address.GetNetworkAddress(subnetMask);
-            IPAddress network2 = address2.GetNetworkAddress(subnetMask);
+            var network1 = address.GetNetworkAddress(subnetMask);
+            var network2 = address2.GetNetworkAddress(subnetMask);
 
             return network1.Equals(network2);
         }

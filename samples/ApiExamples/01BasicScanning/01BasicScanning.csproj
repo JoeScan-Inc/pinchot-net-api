@@ -4,11 +4,11 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <RootNamespace>_01BasicScanning</RootNamespace>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+	<EnableNETAnalyzers>true</EnableNETAnalyzers>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="JoeScan.Pinchot" Version="13.1.0" />
+    <PackageReference Include="JoeScan.Pinchot" Version="13.1.1" />
   </ItemGroup>
 
 </Project>

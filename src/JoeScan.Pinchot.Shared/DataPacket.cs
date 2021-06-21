@@ -16,36 +16,36 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Source is a unique identifier for the combination of ScanHead, Camera and Laser.
         /// </summary>
-        internal int Source { get; private set; }
+        internal int Source { get; }
 
-        internal int ScanHead { get; private set; }
-        internal Camera Camera { get; private set; }
-        internal Laser Laser { get; private set; }
+        internal int ScanHead { get; }
+        internal Camera Camera { get; }
+        internal Laser Laser { get; }
 
         /// <summary>
         /// This is the head's own timestamp, not the time this datagram was received or processed.
         /// </summary>
-        internal long Timestamp { get; set; }
+        internal long Timestamp { get; }
 
         /// <summary>
         /// Internal timestamp to keep track of timeouts and throughput.
         /// </summary>
-        internal long Received { get; private set; }
+        internal long Received { get; }
 
-        internal int PartNum { get; private set; }
-        internal int NumParts { get; private set; }
-        internal int PayloadLength { get; private set; }
-        internal int NumEncoderVals { get; private set; }
-        internal DataType Contents { get; private set; }
-        internal int NumContentTypes { get; private set; }
-        internal short StartColumn { get; set; }
-        internal short EndColumn { get; set; }
+        internal int PartNum { get; }
+        internal int NumParts { get; }
+        internal int PayloadLength { get; }
+        internal int NumEncoderVals { get; }
+        internal DataType Contents { get; }
+        internal int NumContentTypes { get; }
+        internal short StartColumn { get; }
+        internal short EndColumn { get; }
 
-        internal long[] EncoderVals { get; private set; }
-        internal short LaserOnTime { get; set; }
-        internal short ExposureTime { get; set; }
+        internal long[] EncoderVals { get; }
+        internal short LaserOnTime { get; }
+        internal short ExposureTime { get; }
 
-        internal Dictionary<DataType, FragmentLayout> FragmentLayouts { get; private set; }
+        internal Dictionary<DataType, FragmentLayout> FragmentLayouts { get; }
 
         internal DataPacket(byte[] packet, long receivedTimeStamp)
         {
@@ -65,10 +65,10 @@ namespace JoeScan.Pinchot
             NumContentTypes = Contents.BitsSet();
             NumEncoderVals = packet[22];
             EncoderVals = new long[NumEncoderVals];
-            int encOffset = NumContentTypes * 2 + 4; // offset from the end of the header at byte 32
+            int encOffset = (NumContentTypes * 2) + 4; // offset from the end of the header at byte 32
             for (int i = 0; i < NumEncoderVals; i++)
             {
-                EncoderVals[i] = IPAddress.NetworkToHostOrder(BitConverter.ToInt64(packet, 32 + encOffset + i * 8));
+                EncoderVals[i] = IPAddress.NetworkToHostOrder(BitConverter.ToInt64(packet, 32 + encOffset + (i * 8)));
             }
 
             // Contents now holds a bitfield for how many data types are present
@@ -77,7 +77,7 @@ namespace JoeScan.Pinchot
 
             FragmentLayouts = new Dictionary<DataType, FragmentLayout>();
             int offset = 0;
-            int dataOffset = 32 + 4 + NumEncoderVals * 8 + NumContentTypes * 2;
+            int dataOffset = 32 + 4 + (NumEncoderVals * 8) + (NumContentTypes * 2);
             foreach (var dt in Contents.GetFlags())
             {
                 short step = IPAddress.NetworkToHostOrder(BitConverter.ToInt16(packet, 32 + 4 + offset));

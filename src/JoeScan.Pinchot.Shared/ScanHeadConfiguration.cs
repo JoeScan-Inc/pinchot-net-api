@@ -95,7 +95,7 @@ namespace JoeScan.Pinchot
         /// </exception>
         public int LaserDetectionThreshold
         {
-            get { return laserDetectionThreshold; }
+            get => laserDetectionThreshold;
             set
             {
                 if (value < 0 || value > 1023)
@@ -119,7 +119,7 @@ namespace JoeScan.Pinchot
         /// </exception>
         public int SaturationThreshold
         {
-            get { return saturationThreshold; }
+            get => saturationThreshold;
             set
             {
                 if (value < 0 || value > 1023)
@@ -143,7 +143,7 @@ namespace JoeScan.Pinchot
         /// </exception>
         public int SaturatedPercentage
         {
-            get { return saturatedPercentage; }
+            get => saturatedPercentage;
             set
             {
                 if (value < 1 || value > 100)
@@ -170,7 +170,7 @@ namespace JoeScan.Pinchot
 
         #region Internal Properties
 
-        /// <summary> 
+        /// <summary>
         /// In modes where image data is requested, the auto-exposure control will try to keep the image's average brightness at this level.
         /// If you find the image mode is too dark or too bright, then raise or lower this value accordingly. This setting
         /// has no effect on the measurement of points; it only changes how the image data is scaled. 0-255. Default: 150 
@@ -179,7 +179,7 @@ namespace JoeScan.Pinchot
         [JsonProperty(nameof(AverageIntensity))]
         internal int AverageIntensity
         {
-            get { return averageIntensity; }
+            get => averageIntensity;
             set
             {
                 if (value < 0 || value > 255)
@@ -228,14 +228,14 @@ namespace JoeScan.Pinchot
         /// Must be smaller than or equal to <paramref name="maxTimeUs"/>. Allowed Range 15μs - 650,000μs. Default: 500μs</param>
         /// <param name="maxTimeUs">Upper bound for the auto-exposure algorithm. Value in microseconds.
         /// Must be greater than <paramref name="defaultTimeUs"/>. Allowed Range 15μs - 650,000μs. Default: 1000μs</param>
-        /// <exception cref="System.ArgumentOutOfRangeException">
+        /// <exception cref="ArgumentOutOfRangeException">
         /// <paramref name="minTimeUs"/> out of range (15μs - 650,000μs)<br/>
         /// -or-<br/>
         /// <paramref name="defaultTimeUs"/> out of range (15μs - 650,000μs)<br/>
         /// -or-<br/>
         /// <paramref name="maxTimeUs"/> out of range (15μs - 650,000μs)
         /// </exception>
-        /// <exception cref="System.ArgumentException">
+        /// <exception cref="ArgumentException">
         /// <paramref name="minTimeUs"/> must be less or equal to <paramref name="defaultTimeUs"/><br/>
         /// -or-<br/>
         /// <paramref name="maxTimeUs"/> must be greater or equal to <paramref name="defaultTimeUs"/>
@@ -271,9 +271,9 @@ namespace JoeScan.Pinchot
                 throw new ArgumentException("MaxLaserOn must be greater or equal to DefaultLaserOn");
             }
 
-            this.MinLaserOnTime = minTimeUs;
-            this.DefaultLaserOnTime = defaultTimeUs;
-            this.MaxLaserOnTime = maxTimeUs;
+            MinLaserOnTime = minTimeUs;
+            DefaultLaserOnTime = defaultTimeUs;
+            MaxLaserOnTime = maxTimeUs;
         }
 
         /// <summary>
@@ -286,14 +286,14 @@ namespace JoeScan.Pinchot
         /// Must be smaller than or equal to <paramref name="maxTimeUs"/>. Allowed Range 15μs - 2,000,000μs. Default: 500,000μs</param>
         /// <param name="maxTimeUs">Upper bound for the image mode auto-exposure algorithm. Value in microseconds.
         /// Must be greater than <paramref name="defaultTimeUs"/>. Allowed Range 15μs - 2,000,000μs. Default: 1,000,000μs</param>
-        /// <exception cref="System.ArgumentOutOfRangeException">
+        /// <exception cref="ArgumentOutOfRangeException">
         /// <paramref name="minTimeUs"/> out of range (15μs - 2,000,000μs)<br/>
         /// -or-<br/>
         /// <paramref name="defaultTimeUs"/> out of range (15μs - 2,000,000μs)<br/>
         /// -or-<br/>
         /// <paramref name="maxTimeUs"/> out of range (15μs - 2,000,000μs)
         /// </exception>
-        /// <exception cref="System.ArgumentException">
+        /// <exception cref="ArgumentException">
         /// <paramref name="minTimeUs"/> must be less or equal to <paramref name="defaultTimeUs"/><br/>
         /// -or-<br/>
         /// <paramref name="maxTimeUs"/> must be greater or equal to <paramref name="defaultTimeUs"/>
@@ -328,9 +328,9 @@ namespace JoeScan.Pinchot
                 throw new ArgumentException("MaxExposure must be greater or equal to DefaultExposure");
             }
 
-            this.MinCameraExposureTime = minTimeUs;
-            this.DefaultCameraExposureTime = defaultTimeUs;
-            this.MaxCameraExposureTime = maxTimeUs;
+            MinCameraExposureTime = minTimeUs;
+            DefaultCameraExposureTime = defaultTimeUs;
+            MaxCameraExposureTime = maxTimeUs;
         }
 
         /// <summary>
@@ -342,21 +342,6 @@ namespace JoeScan.Pinchot
         public object Clone()
         {
             return MemberwiseClone();
-        }
-
-        #endregion
-
-        #region Internal Methods
-
-        /// <summary>
-        /// Performs a validation of the configuration to ensure there
-        /// are no conflicts. Note, this method is not currently implemented.
-        /// </summary>
-        /// <returns><c>true</c> if the configuration is valid, <c>false</c> otherwise.</returns>
-        internal bool Validate()
-        {
-            // TODO: implement 
-            return true;
         }
 
         #endregion

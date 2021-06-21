@@ -30,14 +30,10 @@ namespace JoeScan.Pinchot
         #region Private Fields
 
         private readonly ConcurrentDictionary<uint, ScanHead> scanHeads = new ConcurrentDictionary<uint, ScanHead>();
-
-        private readonly ConcurrentDictionary<uint, ScanHead>
-            idToScanHeads = new ConcurrentDictionary<uint, ScanHead>();
-
-        private static byte sessionId = 1;
+        private readonly ConcurrentDictionary<uint, ScanHead> idToScanHeads = new ConcurrentDictionary<uint, ScanHead>();
         private Thread statsThread;
         private readonly Stopwatch timeBase = Stopwatch.StartNew();
-        private CancellationTokenSource cancellationTokenSource = null;
+        private CancellationTokenSource cancellationTokenSource;
         private CancellationToken token;
         private Dictionary<uint, CommStatsEventArgs> previousCommStats = new Dictionary<uint, CommStatsEventArgs>();
         private bool disposed;
@@ -68,7 +64,7 @@ namespace JoeScan.Pinchot
         /// A value indicating whether all <see cref="ScanHeads"/> have established network
         /// connection to their associated physical scan heads.
         /// </value>
-        public bool IsConnected => ScanHeads.Count > 0 && ScanHeads.Where(s => s.Enabled).All(s => s.IsConnected);
+        public bool IsConnected => ScanHeads.Any(s => s.Enabled) && ScanHeads.Where(s => s.Enabled).All(s => s.IsConnected);
 
         /// <summary>
         /// Gets a read-only collection of <see cref="ScanHead"/>s belonging to the <see cref="ScanSystem"/>.
@@ -80,20 +76,16 @@ namespace JoeScan.Pinchot
 
         #region Internal Properties
 
-        internal static byte SessionId
-        {
-            get => sessionId;
-            private set => sessionId = value;
-        }
+        internal static byte SessionId { get; private set; } = 1;
 
-        internal ConnectionType ConnectionType { get; set; } = ConnectionType.Normal;
+        internal ConnectionType ConnectionType { get; set; }
 
         /// <summary>
         /// Aggregated network communication statistics for all <see cref="Pinchot.ScanHead"/> objects.
         /// </summary>
         internal CommStatsEventArgs CommStats { get; private set; } = new CommStatsEventArgs();
 
-        internal bool CommStatsEnabled = false;
+        internal bool CommStatsEnabled;
 
         internal short StartColumn { get; private set; }
 
@@ -108,10 +100,7 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Initializes a new instance of the <see cref="ScanSystem"/> class.
         /// </summary>
-        public ScanSystem()
-        {
-            EncoderPulseInterval = 1.0;
-        }
+        public ScanSystem() => EncoderPulseInterval = 1.0;
 
         /// <nodoc/>
         ~ScanSystem()
@@ -135,7 +124,9 @@ namespace JoeScan.Pinchot
         protected virtual void Dispose(bool disposing)
         {
             if (disposed)
+            {
                 return;
+            }
 
             if (disposing)
             {
@@ -237,12 +228,12 @@ namespace JoeScan.Pinchot
             return idToScanHeads[id];
         }
 
-        // TODO-CCP: wait for connect should be optional
+        // TODO: wait for connect should be optional
         /// <summary>
         /// Attempts to connect all <see cref="ScanHeads"/> to their associated physical scan heads.
         /// </summary>
         /// <param name="connectTimeout">The connection timeout period.</param>
-        /// <returns>A <see cref="IReadOnlyCollection{T}"/> of <see cref="Pinchot.ScanHead"/>s
+        /// <returns>A <see cref="IReadOnlyCollection{T}"/> of <see cref="ScanHead"/>s
         /// that did not successfully connect.</returns>
         /// <exception cref="InvalidOperationException">
         /// <see cref="ScanHeads"/> does not contain any <see cref="ScanHead"/>s.<br/>
@@ -253,78 +244,92 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// <see cref="IsScanning"/> is `true`.
         /// </exception>
+        /// <exception cref="TimeoutException">
+        /// A scan head reports that it's connected but no new status messages are being received.
+        /// </exception>
         public IReadOnlyCollection<ScanHead> Connect(TimeSpan connectTimeout)
         {
-            if (!ScanHeads.Any())
+            if (ScanHeads.Count == 0)
             {
-                var msg = "No scan heads in scan system.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("No scan heads in scan system.");
             }
 
             if (!ScanHeads.Any(s => s.Enabled))
             {
-                var msg = "No scan heads are enabled.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("No scan heads are enabled.");
             }
 
             if (IsConnected)
             {
-                var msg = "Already connected.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Already connected.");
             }
 
             if (IsScanning)
             {
-                var msg = "Already scanning.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Already scanning.");
             }
 
-            // Create new session id and connect to all heads 
-            sessionId++;
-            CommStats = new CommStatsEventArgs();
-            previousCommStats = new Dictionary<uint, CommStatsEventArgs>();
-            foreach (var scanHead in ScanHeads)
-            {
-                if (!scanHead.ValidateConfiguration())
-                {
-                    throw new InvalidOperationException("Configuration validation failed for scan head " + scanHead.ID + ".");
-                }
+            var enabledHeads = ScanHeads.Where(s => s.Enabled);
 
-                scanHead.StartSenderReceiver(sessionId, ConnectionType);
+            foreach (var scanHead in enabledHeads)
+            {
+                scanHead.StartSenderReceiver(SessionId++, ConnectionType);
                 scanHead.StatsEvent += UpdateCommStats;
             }
 
             // now check if all heads responded
-            var connectedHeadIPs = WaitForConnect(ScanHeads.Select(s => s.IPAddress), connectTimeout).ToList();
+            var connectedHeadIPs = WaitForConnect(enabledHeads, connectTimeout).ToList();
 
-            var mismatches = ScanHeads.Where(s => s.Enabled).Where(s => s.IsVersionMismatched);
+            var mismatches = enabledHeads.Where(s => s.IsVersionMismatched);
             if (mismatches.Any())
             {
                 var errs = mismatches.Select(mm =>
                     $"Scan head {mm.SerialNumber} failed to connect: {mm.VersionMismatchReason}");
-                var err = string.Join("\n", errs);
-                throw new InvalidOperationException(err);
+                throw new InvalidOperationException(string.Join("\n", errs));
             }
 
-            var connectedHeads = ScanHeads.Where(s => connectedHeadIPs.Contains(s.IPAddress)).ToList();
-            foreach (var s in connectedHeads.Where(s => s.Enabled))
+            var connectedHeads = enabledHeads.Where(s => connectedHeadIPs.Contains(s.IPAddress)).ToList();
+            connectedHeads.ForEach(s => s.SetWindow());
+
+            // Wait for any status messages already in-transit before applying the window to be received
+            var transitWait = TimeSpan.FromMilliseconds(100);
+            Thread.Sleep(transitWait);
+            connectTimeout -= transitWait;
+
+            var waitSpan = TimeSpan.FromMilliseconds(10);
+            var oldTimestamps = connectedHeads.ConvertAll(s => s.Status.GlobalTime);
+            bool done = false;
+            while (!done)
             {
-                s.SetWindow();
-            }
+                done = true;
+                var newTimestamps = connectedHeads.ConvertAll(s => s.Status.GlobalTime);
+                foreach ((long oldTs, long newTs) in oldTimestamps.Zip(newTimestamps, (f,s) => (f,s)))
+                {
+                    if (oldTs == newTs)
+                    {
+                        done = false;
+                    }
+                }
 
-            // Wait for scan heads to configure the window and report max scan rate
-            // via status message.
-            Thread.Sleep(250);
+                Thread.Sleep(waitSpan);
+                connectTimeout -= waitSpan;
+                if (connectTimeout <= TimeSpan.Zero)
+                {
+                    throw new TimeoutException("Failed to get new status messages from connected heads");
+                }
+            }
 
             cancellationTokenSource = new CancellationTokenSource();
             token = cancellationTokenSource.Token;
             if (CommStatsEnabled)
             {
+                CommStats = new CommStatsEventArgs();
+                previousCommStats = new Dictionary<uint, CommStatsEventArgs>();
                 statsThread = new Thread(StatsThread) { Priority = ThreadPriority.Lowest, IsBackground = true };
                 statsThread.Start();
             }
 
-            return ScanHeads.Where(s => s.Enabled).Except(connectedHeads).ToList();
+            return enabledHeads.Except(connectedHeads).ToList();
         }
 
         /// <summary>
@@ -383,19 +388,17 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                var msg = "Attempting to start scanning when not connected.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Attempting to start scanning when not connected.");
             }
 
             if (IsScanning)
             {
-                var msg = "Attempting to start scanning while already scanning.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Attempting to start scanning while already scanning.");
             }
 
             if (rate > GetMaxScanRate())
             {
-                var msg =
+                string msg =
                     $"Requested scan rate of {rate}Hz is greater than the maximum allowed of {GetMaxScanRate()}Hz";
                 throw new ArgumentException(msg);
             }
@@ -423,8 +426,7 @@ namespace JoeScan.Pinchot
         {
             if (!IsScanning)
             {
-                var msg = "Attempting to stop scanning when not scanning.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Attempting to stop scanning when not scanning.");
             }
 
             foreach (var scanHead in ScanHeads)
@@ -446,13 +448,12 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                var msg = "Attempting to get max scan rate when not connected.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Attempting to get max scan rate when not connected.");
             }
 
             double maxLaserOnTime = 0;
-            var minWindowBasedScanRate = double.MaxValue;
-            foreach (var scanHead in ScanHeads)
+            double minWindowBasedScanRate = double.MaxValue;
+            foreach (var scanHead in ScanHeads.Where(s => s.Enabled))
             {
                 if (scanHead.Configuration.MaxLaserOnTime > maxLaserOnTime)
                 {
@@ -465,8 +466,8 @@ namespace JoeScan.Pinchot
                 }
             }
 
-            var minLaserOnTimeBasedScanRate = 1 / (maxLaserOnTime / 1e6);
-            var minRateAmongScanHeads = Math.Min(minLaserOnTimeBasedScanRate, minWindowBasedScanRate);
+            double minLaserOnTimeBasedScanRate = 1 / (maxLaserOnTime / 1e6);
+            double minRateAmongScanHeads = Math.Min(minLaserOnTimeBasedScanRate, minWindowBasedScanRate);
             return Math.Min(minRateAmongScanHeads, Globals.MaxScanRate);
         }
 
@@ -483,7 +484,7 @@ namespace JoeScan.Pinchot
 
             if (startColumn == endColumn || startColumn > endColumn || startColumn < 0 || endColumn > 1455)
             {
-                throw new ArgumentOutOfRangeException("Illegal value for start column or end column.");
+                throw new ArgumentOutOfRangeException(nameof(startColumn), "Illegal value for start column or end column.");
             }
 
             StartColumn = startColumn;
@@ -494,20 +495,18 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                var msg = "Not connected.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Not connected.");
             }
 
             if (IsScanning)
             {
-                var msg = "Already scanning.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Already scanning.");
             }
 
             // TODO-CCP: need to determine the bounds
             if (rate < 0.02 || rate > 5000)
             {
-                var msg = $"Scan rate {rate} outside of allowed range. Must be between 0.02 and 5000 Hz";
+                string msg = $"Scan rate {rate} outside of allowed range. Must be between 0.02 and 5000 Hz";
                 throw new ArgumentOutOfRangeException(msg);
             }
 
@@ -523,20 +522,18 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                var msg = "Not connected.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Not connected.");
             }
 
             if (IsScanning)
             {
-                var msg = "Already scanning.";
-                throw new InvalidOperationException(msg);
+                throw new InvalidOperationException("Already scanning.");
             }
 
             // TODO-CCP: need to determine the bounds
             if (rate < 0.02 || rate > 20)
             {
-                var msg = $"Scan rate {rate} outside of allowed range. Must be between 0.02 and 20 Hz";
+                string msg = $"Scan rate {rate} outside of allowed range. Must be between 0.02 and 20 Hz";
                 throw new ArgumentOutOfRangeException(msg);
             }
 
@@ -590,7 +587,7 @@ namespace JoeScan.Pinchot
 
             if (!scanHeads.Values.Contains(scanHead))
             {
-                throw new ArgumentException($"Scan head is not managed.");
+                throw new ArgumentException("Scan head is not managed.");
             }
 
             var s = scanHeads.FirstOrDefault(q => q.Value == scanHead);
@@ -653,14 +650,9 @@ namespace JoeScan.Pinchot
             var stopwatch = new Stopwatch();
             stopwatch.Start();
             profile = new Profile();
-            while (true)
+            while (!token.IsCancellationRequested)
             {
-                if (token.IsCancellationRequested)
-                {
-                    break;
-                }
-
-                // TODO-CCP: this should be improved to ensure all scan heads are taken from
+                // TODO: this should be improved to ensure all scan heads are taken from
                 foreach (var scanHead in ScanHeads.Where(s => s.Enabled))
                 {
                     if (scanHead.Profiles.TryTake(out profile, 0, token))
@@ -682,7 +674,7 @@ namespace JoeScan.Pinchot
         {
             if (fileInfo is null)
             {
-                throw new ArgumentNullException($"{nameof(fileInfo)} argument is null.");
+                throw new ArgumentNullException(nameof(fileInfo));
             }
 
             if (!Directory.Exists(fileInfo.DirectoryName))
@@ -690,9 +682,9 @@ namespace JoeScan.Pinchot
                 Directory.CreateDirectory(fileInfo.DirectoryName);
             }
 
-            using (StreamWriter file = File.CreateText(fileInfo.FullName))
+            using (var file = File.CreateText(fileInfo.FullName))
             {
-                JsonSerializer serializer = new JsonSerializer();
+                var serializer = new JsonSerializer();
                 serializer.Serialize(file, ScanHeads);
             }
         }
@@ -701,7 +693,7 @@ namespace JoeScan.Pinchot
         {
             if (fileInfo is null)
             {
-                throw new ArgumentNullException($"{nameof(fileInfo)} argument is null.");
+                throw new ArgumentNullException(nameof(fileInfo));
             }
 
             if (!File.Exists(fileInfo.FullName))
@@ -726,37 +718,29 @@ namespace JoeScan.Pinchot
 
         #region Private Methods
 
-        private void OnScanSyncUpdate(object sender, ScanSyncUpdateEvent e)
+        private static IEnumerable<IPAddress> WaitForConnect(IEnumerable<ScanHead> scanHeads, TimeSpan timeout)
         {
-        }
-
-        private IEnumerable<IPAddress> WaitForConnect(IEnumerable<IPAddress> heads, TimeSpan timeout)
-        {
-            TimeSpan spent = TimeSpan.Zero;
-            TimeSpan waitSpan = TimeSpan.FromMilliseconds(10);
-            List<IPAddress> connectedHeads = new List<IPAddress>();
-            do
+            var waitSpan = TimeSpan.FromMilliseconds(10);
+            var connectedHeads = new List<IPAddress>();
+            while (scanHeads.Count() != connectedHeads.Count)
             {
-                foreach (var scanHead in ScanHeads.Where(s => s.Enabled))
+                foreach (var scanHead in scanHeads)
                 {
                     if (scanHead.IsConnected && !connectedHeads.Contains(scanHead.IPAddress))
                     {
                         connectedHeads.Add(scanHead.IPAddress);
-                        if (heads.Count() == connectedHeads.Count)
-                        {
-                            return connectedHeads;
-                        }
                     }
                 }
 
-                // timed out, check if allotted timeout is up
                 Thread.Sleep(waitSpan);
-                spent += waitSpan;
-                if (spent > timeout)
+                timeout -= waitSpan;
+                if (timeout <= TimeSpan.Zero)
                 {
-                    return connectedHeads;
+                    break;
                 }
-            } while (true);
+            }
+
+            return connectedHeads;
         }
 
         private void UpdateCommStats(object sender, CommStatsEventArgs args)
@@ -782,7 +766,7 @@ namespace JoeScan.Pinchot
 
                 previousCommStats[args.ID] = args;
             }
-            catch (Exception)
+            catch
             {
                 // TODO-CCP: after removing NLog, this function started throwing exceptions. Probably a race
                 // condition. This catch is a bandaid, but seems to work.
@@ -791,7 +775,7 @@ namespace JoeScan.Pinchot
 
         private void StatsThread()
         {
-            var lastCheck = timeBase.ElapsedMilliseconds;
+            long lastCheck = timeBase.ElapsedMilliseconds;
             long bytesReceivedSinceLastCheck = 0;
             while (true)
             {
