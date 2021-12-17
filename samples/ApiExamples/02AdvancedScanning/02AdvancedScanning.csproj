@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="JoeScan.Pinchot" Version="13.1.1" />
+    <PackageReference Include="JoeScan.Pinchot" Version="13.1.*" />
   </ItemGroup>
 
 </Project>
