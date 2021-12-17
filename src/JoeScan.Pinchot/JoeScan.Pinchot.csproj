@@ -29,7 +29,7 @@
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
-    <PackageReference Include="RestSharp" Version="106.11.7" />
+    <PackageReference Include="RestSharp" Version="106.12.0" />
     <PackageReference Include="System.Memory" Version="4.5.4" />
     <None Include="JoeScanDeveloperIcon128.png" Pack="true" PackagePath="\" />
   </ItemGroup>
