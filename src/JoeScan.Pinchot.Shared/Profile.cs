@@ -1,4 +1,4 @@
-﻿// Copyright(c) JoeScan Inc. All Rights Reserved.
+// Copyright(c) JoeScan Inc. All Rights Reserved.
 //
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
@@ -19,7 +19,7 @@ namespace JoeScan.Pinchot
     /// timestamp, encoder values, and other properties. Methods for retrieving only valid <see cref="Point2D"/>
     /// data are also provided.
     /// </remarks>
-    public class Profile : ICloneable
+    public class Profile : IProfile, ICloneable
     {
         #region Private Fields
 
