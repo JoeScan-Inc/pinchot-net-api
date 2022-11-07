@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="JoeScan.Pinchot.Defaults.targets" />
+  <ItemGroup>
+    <Reference Include="lib\*.dll" />
+  </ItemGroup>
+</Project>
