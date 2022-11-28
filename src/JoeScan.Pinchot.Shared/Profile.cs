@@ -1,4 +1,4 @@
-// Copyright(c) JoeScan Inc. All Rights Reserved.
+﻿// Copyright(c) JoeScan Inc. All Rights Reserved.
 //
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
@@ -19,7 +19,7 @@ namespace JoeScan.Pinchot
     /// timestamp, encoder values, and other properties. Methods for retrieving only valid <see cref="Point2D"/>
     /// data are also provided.
     /// </remarks>
-    public class Profile : IProfile, ICloneable
+    public class Profile : ICloneable
     {
         #region Private Fields
 
@@ -124,7 +124,7 @@ namespace JoeScan.Pinchot
         /// <returns>A <see cref="IEnumerable{Point2D}"/> of the valid <see cref="Point2D"/>s in the <see cref="Profile"/>.</returns>
         public IEnumerable<Point2D> GetValidXYPoints()
         {
-            return RawPoints.ToArray().Where(q => !double.IsNaN(q.Y));
+            return RawPoints.ToArray().Where(q => q.IsValid());
         }
 
         /// <summary>
@@ -148,7 +148,7 @@ namespace JoeScan.Pinchot
             int i = 0;
             foreach (var point in RawPoints)
             {
-                if (double.IsNaN(point.Y))
+                if (!point.IsValid())
                 {
                     continue;
                 }

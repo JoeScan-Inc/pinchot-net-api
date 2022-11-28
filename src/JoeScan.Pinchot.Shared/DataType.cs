@@ -29,7 +29,8 @@ namespace JoeScan.Pinchot
         internal static readonly IEnumerable<DataType> DataTypes =
             Enum.GetValues(typeof(DataType))
                 .Cast<DataType>()
-                .Where(d => d != DataType.Invalid);
+                .Where(d => d != DataType.Invalid)
+                .ToArray();// finalize the lazy linq so it is executed only once
     }
 
     internal static class DataTypeExtensions
@@ -64,12 +65,15 @@ namespace JoeScan.Pinchot
                 case DataType.LM:
                 case DataType.IM:
                     return 1;
+
                 case DataType.XY:
                     return 4;
+
                 case DataType.SP:
                 case DataType.PW:
                 case DataType.VR:
                     return 2;
+
                 case DataType.Invalid:
                     throw new ArgumentException("Invalid data type", nameof(t));
                 default:

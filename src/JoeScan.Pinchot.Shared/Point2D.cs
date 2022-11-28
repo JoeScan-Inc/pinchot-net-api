@@ -5,6 +5,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
 namespace JoeScan.Pinchot
 {
@@ -20,19 +21,19 @@ namespace JoeScan.Pinchot
         /// Gets or sets the X coordinate value of the <see cref="Point2D"/> in inches.
         /// </summary>
         /// <value>The X coordinate value of the <see cref="Point2D"/> in inches.</value>
-        public double X { get; set; }
+        public double X { get; set; } = double.NaN;
 
         /// <summary>
         /// Gets or sets the Y coordinate value of the <see cref="Point2D"/> in inches.
         /// </summary>
         /// <value>The Y coordinate value of the <see cref="Point2D"/> in inches.</value>
-        public double Y { get; set; }
+        public double Y { get; set; } = double.NaN;
 
         /// <summary>
         /// Gets or sets the brightness value of the <see cref="Point2D"/>.
         /// </summary>
         /// <value>The brightness value of the <see cref="Point2D"/>.</value>
-        public int Brightness { get; set; }
+        public int Brightness { get; set; } = Globals.ProfileDataInvalidBrightness;
 
         #endregion
 
@@ -61,6 +62,11 @@ namespace JoeScan.Pinchot
         #endregion
 
         #region Public Methods
+
+        /// <summary>
+        /// Check if this point is valid
+        /// </summary>
+        public bool IsValid() => !double.IsNaN(Y);
 
         /// <summary>
         /// Compares two <see cref="Point2D"/> objects. The result specifies whether the two <see cref="Point2D"/> objects have

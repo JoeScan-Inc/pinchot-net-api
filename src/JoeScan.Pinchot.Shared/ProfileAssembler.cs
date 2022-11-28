@@ -89,7 +89,6 @@ namespace JoeScan.Pinchot
             p.RawPointsMemory = new Memory<Point2D>(rawPointsArray, rawPointsArrayIndex * Globals.RawProfileDataLength,
                 Globals.RawProfileDataLength);
             var rawPointsSpan = p.RawPointsMemory.Span;
-            rawPointsSpan.Fill(new Point2D(double.NaN, double.NaN, Globals.ProfileDataInvalidBrightness));
 
             var tr = alignmentParameters[seedPacket.Camera];
             double sinRoll = tr.SinRoll;
@@ -130,6 +129,7 @@ namespace JoeScan.Pinchot
                                 destIdx += inc;
                             }
                             break;
+
                         case DataType.XY:
                             for (int j = 0; j < numVals; j++)
                             {
@@ -147,6 +147,7 @@ namespace JoeScan.Pinchot
                                 destIdx += inc;
                             }
                             break;
+
                         case DataType.SP:
                             for (int j = 0; j < numVals; j++)
                             {
@@ -157,6 +158,7 @@ namespace JoeScan.Pinchot
                                 destIdx += inc;
                             }
                             break;
+
                         case DataType.IM:
                             // TODO: Adapt to use SP type
                             // last packet is subpixel data corresponding to laser line
