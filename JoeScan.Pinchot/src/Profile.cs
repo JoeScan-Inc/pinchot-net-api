@@ -76,7 +76,7 @@ namespace JoeScan.Pinchot
             for (int i = 0; i < RawPoints.Length; i += stride)
             {
                 var p = RawPoints[i];
-                if (!double.IsNaN(p.Y))
+                if (p.IsValid)
                 {
                     yield return p;
                 }
@@ -98,7 +98,7 @@ namespace JoeScan.Pinchot
             for (int i = 0; i < RawPoints.Length; i += stride)
             {
                 var p = RawPoints[i];
-                if (!double.IsNaN(p.Y))
+                if (p.IsValid)
                 {
                     validPoints[validIdx++] = p;
                 }

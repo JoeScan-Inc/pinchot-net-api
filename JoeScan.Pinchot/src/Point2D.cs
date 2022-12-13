@@ -10,7 +10,8 @@ namespace JoeScan.Pinchot
 {
     /// <summary>
     /// A data point consisting of X and Y spatial coordinates and a brightness value.
-    /// Invalid points have an X and Y value of <see cref="Globals.ProfileDataInvalidXY"/>.
+    /// Invalid points have an X and Y value of <see cref="Globals.ProfileDataInvalidXY"/>
+    /// and a brightness of <see cref="Globals.ProfileDataInvalidBrightness"/>.
     /// </summary>
     [DebuggerDisplay("X: {X} Y: {Y} Brightness: {Brightness}")]
     public struct Point2D : IEquatable<Point2D>
@@ -34,6 +35,12 @@ namespace JoeScan.Pinchot
         /// </summary>
         /// <value>The brightness value.</value>
         public int Brightness { get; set; }
+
+        /// <summary>
+        /// Checks if the point holds valid data.
+        /// </summary>
+        /// <value><see langword="true"/> if point is valid else <see langword="false"/>.</value>
+        public bool IsValid => !double.IsNaN(Y);
 
         #endregion
 
