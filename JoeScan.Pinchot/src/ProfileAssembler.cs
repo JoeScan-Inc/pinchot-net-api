@@ -4,7 +4,7 @@
 // root for license information.
 
 using System;
-using System.Collections.Generic;
+using System.Linq;
 
 namespace JoeScan.Pinchot
 {
@@ -14,8 +14,9 @@ namespace JoeScan.Pinchot
 
         private readonly ScanHead scanHead;
         private readonly AllDataFormat dataFormat;
-        private const int RawPointsArrayCapacity = 100;
-        private Point2D[] rawPointsArray;
+        private const int NumProfilesToBuffer = 100;
+        private readonly Point2D[] defaultPointsArray;
+        private readonly Point2D[] rawPointsArray;
         private int rawPointsArrayIndex;
         private AlignmentParameters alignment;
 
@@ -27,7 +28,18 @@ namespace JoeScan.Pinchot
         {
             this.dataFormat = dataFormat;
             this.scanHead = scanHead;
-            rawPointsArray = new Point2D[RawPointsArrayCapacity * Globals.RawProfileDataLength];
+
+            var defaultPoint = new Point2D
+            {
+                X = Globals.ProfileDataInvalidXY,
+                Y = Globals.ProfileDataInvalidXY,
+                Brightness = Globals.ProfileDataInvalidBrightness
+            };
+
+            // keep copy of default array to save on computation time
+            // when raw points array needs to be reset
+            defaultPointsArray = Enumerable.Repeat(defaultPoint, NumProfilesToBuffer * Globals.RawProfileDataLength).ToArray();
+            rawPointsArray = defaultPointsArray.Clone() as Point2D[];
             rawPointsArrayIndex = 0;
         }
 
@@ -58,23 +70,15 @@ namespace JoeScan.Pinchot
             }
 
             rawPointsArrayIndex++;
-            if (rawPointsArrayIndex >= RawPointsArrayCapacity)
+            if (rawPointsArrayIndex >= NumProfilesToBuffer)
             {
-                rawPointsArray = new Point2D[RawPointsArrayCapacity * Globals.RawProfileDataLength];
+                defaultPointsArray.CopyTo(rawPointsArray, 0);
                 rawPointsArrayIndex = 0;
             }
 
             p.RawPointsMemory = new Memory<Point2D>(rawPointsArray,
                 rawPointsArrayIndex * Globals.RawProfileDataLength,
                 Globals.RawProfileDataLength);
-
-            var rawPointsSpan = p.RawPointsMemory.Span;
-            rawPointsSpan.Fill(new Point2D()
-            {
-                X = Globals.ProfileDataInvalidXY,
-                Y = Globals.ProfileDataInvalidXY,
-                Brightness = Globals.ProfileDataInvalidBrightness
-            });
 
             var pair = new CameraLaserPair(p.Camera, p.Laser);
             alignment = scanHead.Alignments[pair];

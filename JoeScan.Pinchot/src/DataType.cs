@@ -29,7 +29,8 @@ namespace JoeScan.Pinchot
         internal static readonly IEnumerable<DataType> DataTypes =
             Enum.GetValues(typeof(DataType))
                 .Cast<DataType>()
-                .Where(d => d != DataType.Invalid);
+                .Where(d => d != DataType.Invalid)
+                .ToArray(); // finalize the lazy linq so it is executed only once
     }
 
     internal static class DataTypeExtensions
