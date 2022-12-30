@@ -3,7 +3,6 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using joescan.schema.client;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -25,7 +24,7 @@ namespace JoeScan.Pinchot
     public sealed class ScanWindow : ICloneable
     {
         [JsonProperty(nameof(WindowConstraints))]
-        internal IList<ConstraintT> WindowConstraints = new List<ConstraintT>();
+        internal IList<ScanWindowConstraint> WindowConstraints = new List<ScanWindowConstraint>();
 
         private ScanWindow()
         {
@@ -84,10 +83,10 @@ namespace JoeScan.Pinchot
             }
 
             var scanWindow = new ScanWindow();
-            scanWindow.WindowConstraints.Add(new ConstraintT() { X0 = (long)windowLeft, Y0 = (long)windowTop, X1 = (long)windowRight, Y1 = (long)windowTop });
-            scanWindow.WindowConstraints.Add(new ConstraintT() { X0 = (long)windowRight, Y0 = (long)windowBottom, X1 = (long)windowLeft, Y1 = (long)windowBottom });
-            scanWindow.WindowConstraints.Add(new ConstraintT() { X0 = (long)windowRight, Y0 = (long)windowTop, X1 = (long)windowRight, Y1 = (long)windowBottom });
-            scanWindow.WindowConstraints.Add(new ConstraintT() { X0 = (long)windowLeft, Y0 = (long)windowBottom, X1 = (long)windowLeft, Y1 = (long)windowTop });
+            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(windowLeft, windowTop, windowRight, windowTop));
+            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(windowRight, windowBottom, windowLeft, windowBottom));
+            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(windowRight, windowTop, windowRight, windowBottom));
+            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(windowLeft, windowBottom, windowLeft, windowTop));
             return scanWindow;
         }
 
@@ -116,60 +115,81 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// There are fewer than 3 points in <paramref name="points"/><br/>
         /// -or-<br/>
-        /// The polygon is not convex.
+        /// The polygon is not convex.<br/>
+        /// -or-<br/>
+        /// The points were not supplied in clockwise order.
         /// </exception>
         public static ScanWindow CreateScanWindowPolygonal(ICollection<Point2D> points)
         {
             if (points.Any(p => double.IsNaN(p.X) || double.IsNaN(p.Y)))
             {
-                throw new ArgumentException("One or more points contain NaN");
+                throw new ArgumentException("One or more points contain NaN.");
             }
 
             if (points.Any(p => double.IsInfinity(p.X) || double.IsInfinity(p.Y)))
             {
-                throw new ArgumentException("One or more points contain infinity");
+                throw new ArgumentException("One or more points contain infinity.");
             }
 
             if (points.Count < 3)
             {
-                throw new ArgumentException("Cannot create polygonal window with fewer than 3 points!");
+                throw new ArgumentException("Cannot create polygonal window with fewer than 3 points.");
+            }
+
+            var checkPoints = new List<Point2D>(points);
+
+            // check for clockwise point ordering - https://stackoverflow.com/a/18472899
+            double sum = 0.0;
+            var p1 = checkPoints.Last();
+            for (int i = 0; i < checkPoints.Count; i++)
+            {
+                var p2 = checkPoints[i];
+                sum += (p2.X - p1.X) * (p2.Y + p1.Y);
+                p1 = p2;
+            }
+
+            // polygon is clockwise if sum is greater than zero
+            if (sum <= 0.0)
+            {
+                throw new ArgumentException("Polygon points not supplied in clockwise order.");
             }
 
             // check for convexity - https://stackoverflow.com/a/1881201
             // add the first two points to the end of the list
             // to make loop cleaner since we have to calculate
             // (p[N-2],p[N-1],p[0]) and (p[N-1],p[0],p[1]).
-            var checkPoints = new List<Point2D>(points);
             checkPoints.Add(checkPoints[0]);
             checkPoints.Add(checkPoints[1]);
 
             var crossProducts = new List<double>();
             for (int i = 0; i < points.Count; ++i)
             {
-                var pts = checkPoints.Skip(i).Take(3);
-                var dx1 = pts.ElementAt(1).X - pts.ElementAt(0).X;
-                var dy1 = pts.ElementAt(1).Y - pts.ElementAt(0).Y;
-                var dx2 = pts.ElementAt(2).X - pts.ElementAt(1).X;
-                var dy2 = pts.ElementAt(2).Y - pts.ElementAt(1).Y;
+                var pts = checkPoints.GetRange(i, 3);
+                double dx1 = pts[1].X - pts[0].X;
+                double dy1 = pts[1].Y - pts[0].Y;
+                double dx2 = pts[2].X - pts[1].X;
+                double dy2 = pts[2].Y - pts[1].Y;
                 crossProducts.Add((dx1 * dy2) - (dy1 * dx2));
             }
 
             // polygon is convex if the sign of all cross products is the same
             if (!crossProducts.All(c => c < 0) && !crossProducts.All(c => c > 0))
             {
-                throw new ArgumentException("Polygon isn't convex!");
+                throw new ArgumentException("Polygon isn't convex.");
             }
 
             var scanWindow = new ScanWindow();
-            Point2D previousPoint = points.ElementAt(0);
+            var previousPoint = points.First();
             foreach (var point in points.Skip(1))
             {
-                scanWindow.WindowConstraints.Add(new ConstraintT { X0 = (long)previousPoint.X, Y0 = (long)previousPoint.Y, X1 = (long)point.X, Y1 = (long)point.Y });
+                scanWindow.WindowConstraints.Add(new ScanWindowConstraint(previousPoint.X, previousPoint.Y, point.X, point.Y));
                 previousPoint = point;
             }
 
-            Point2D firstPoint = points.ElementAt(0);
-            scanWindow.WindowConstraints.Add(new ConstraintT { X0 = (long)previousPoint.X, Y0 = (long)previousPoint.Y, X1 = (long)firstPoint.X, Y1 = (long)firstPoint.Y });
+            // connect the first and last points
+            var firstPoint = points.First();
+            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(previousPoint.X, previousPoint.Y, firstPoint.X, firstPoint.Y));
+
             return scanWindow;
         }
 
@@ -181,7 +201,7 @@ namespace JoeScan.Pinchot
         public object Clone()
         {
             var window = MemberwiseClone() as ScanWindow;
-            window.WindowConstraints = new List<ConstraintT>(WindowConstraints);
+            window.WindowConstraints = new List<ScanWindowConstraint>(WindowConstraints);
             return window;
         }
     }

@@ -336,10 +336,10 @@ namespace JoeScan.Pinchot
             {
                 Parallel.ForEach(EnabledHeads, sh =>
                 {
-                    // TODO: Do this a better way and block SetExclusion mask functions
-                    if (sh.Version.Minor >= 1)
+                    if (sh.IsVersionCompatible(16, 1, 0))
                     {
                         sh.SendAllExclusionMasks();
+                        sh.SendAllBrightnessCorrections();
                     }
 
                     sh.SendAllWindows();
@@ -827,6 +827,9 @@ namespace JoeScan.Pinchot
         /// </summary>
         private async Task KeepAliveLoop()
         {
+            /// The server will keep itself scanning as long as it can send profile data
+            /// over TCP. This keep alive is really only needed to get scan head's to
+            /// recover in the event that they fail to send and go into idle state.
             const int keepAliveIntervalMs = 1000;
 
             try

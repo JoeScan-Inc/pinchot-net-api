@@ -8,6 +8,6 @@
 
 using System.Reflection;
 
-[assembly: AssemblyFileVersion("16.0.4.148")]
-[assembly: AssemblyVersion("16.0.4.148")]
-[assembly: AssemblyInformationalVersion("16.0.4-net-script-to-build-open-source-including-compiled-schemas.1+6945a17")]
+[assembly: AssemblyFileVersion("16.1.0.13")]
+[assembly: AssemblyVersion("16.1.0.13")]
+[assembly: AssemblyInformationalVersion("16.1.0+303cd37")]

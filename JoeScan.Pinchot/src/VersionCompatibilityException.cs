@@ -8,14 +8,18 @@ using System;
 namespace JoeScan.Pinchot
 {
     /// <summary>
-    /// This exception is thrown when the API detects that it is attempting to connect to a
+    /// This exception is thrown when the scan head is not compatible with the operation being performed.
+    /// </summary>
+    /// <remarks>
+    /// One example of this exception being thrown is when the API attempts to connect to a
     /// <see cref="ScanHead"/> with an incompatible version. Only scan heads loaded with
     /// firmware with the same major version as the API are compatible. <br/>
     /// Versions are defined as: <code>Major.Minor.Patch</code>
-    /// Example: <br/>
-    ///     A scan head with a version of <c>13.1.1</c> is compatible with an API with a version of
-    ///     <c>13.4.2</c> because the major version (<c>13</c>) is the same
-    /// </summary>
+    /// </remarks>
+    /// <example>
+    /// A scan head with a version of <c>13.1.1</c> is compatible with an API with a version of
+    /// <c>13.4.2</c> because the major version (<c>13</c>) is the same.
+    /// </example>
     public class VersionCompatibilityException : InvalidOperationException
     {
         internal static string GetErrorReason(ScanHeadVersionInformation version)

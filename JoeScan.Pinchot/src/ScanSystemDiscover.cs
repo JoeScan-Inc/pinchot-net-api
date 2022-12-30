@@ -69,7 +69,7 @@ namespace JoeScan.Pinchot
 
     public partial class ScanSystem
     {
-        private readonly Dictionary<uint, DiscoveredDevice> discoveries = new Dictionary<uint, DiscoveredDevice>();
+        private Dictionary<uint, DiscoveredDevice> discoveries = new Dictionary<uint, DiscoveredDevice>();
 
         /// <summary>
         /// Performs a network discovery to determine what scan heads are on the network.
@@ -77,7 +77,8 @@ namespace JoeScan.Pinchot
         /// <returns>A dictionary of all discovered scan heads where the key is the serial number.</returns>
         public Dictionary<uint, DiscoveredDevice> DiscoverDevices()
         {
-            return DiscoverDevicesAsync().Result;
+            discoveries = Discover().GetAwaiter().GetResult();
+            return discoveries;
         }
 
         /// <summary>
@@ -85,6 +86,17 @@ namespace JoeScan.Pinchot
         /// </summary>
         /// <returns>A dictionary of all discovered scan heads where the key is the serial number.</returns>
         public async Task<Dictionary<uint, DiscoveredDevice>> DiscoverDevicesAsync()
+        {
+            discoveries = await Discover();
+            return discoveries;
+        }
+
+        /// <summary>
+        /// Internal static discovery. This should not be exposed to the
+        /// public to ensure the non-static version is used which has the
+        /// benefit of caching.
+        /// </summary>
+        internal static async Task<Dictionary<uint, DiscoveredDevice>> Discover()
         {
             byte[] message = new Client::MessageClientDiscoveryT
             {
@@ -107,7 +119,7 @@ namespace JoeScan.Pinchot
             // TODO: Should we make this configurable?
             await Task.Delay(200).ConfigureAwait(false);
 
-            discoveries.Clear();
+            var discoveries = new Dictionary<uint, DiscoveredDevice>();
             foreach (var client in activeClients)
             {
                 while (client.Client.Available > 0)

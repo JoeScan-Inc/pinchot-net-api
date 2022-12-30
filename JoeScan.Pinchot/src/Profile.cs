@@ -251,8 +251,8 @@ namespace JoeScan.Pinchot
             var rawPointsArray = new Point2D[numberPoints];
             for (int i = 0; i < numberPoints; i++)
             {
-                double x = reader.ReadDouble();
-                double y = reader.ReadDouble();
+                float x = reader.ReadSingle();
+                float y = reader.ReadSingle();
                 int brightness = reader.ReadInt32();
                 rawPointsArray[i] = new Point2D(x, y, brightness);
             }
@@ -262,8 +262,8 @@ namespace JoeScan.Pinchot
             CameraCoordinates = new Point2D[numSubpixelValues];
             for (int i = 0; i < numSubpixelValues; i++)
             {
-                double x = reader.ReadDouble();
-                double y = reader.ReadDouble();
+                float x = reader.ReadSingle();
+                float y = reader.ReadSingle();
                 int brightness = reader.ReadInt32();
                 CameraCoordinates[i] = new Point2D(x, y, brightness);
             }

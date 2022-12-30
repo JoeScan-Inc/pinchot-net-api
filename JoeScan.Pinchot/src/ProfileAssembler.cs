@@ -132,8 +132,8 @@ namespace JoeScan.Pinchot
                             if (xraw != Globals.ServerProfileDataInvalidXY && yraw != Globals.ServerProfileDataInvalidXY)
                             {
                                 profile.ValidPointCount++;
-                                rawPointsSpan[destIdx].X = (xraw * cameraToMillXX) - (yraw * cameraToMillXY) + shiftX;
-                                rawPointsSpan[destIdx].Y = (xraw * cameraToMillYX) + (yraw * cameraToMillYY) + shiftY;
+                                rawPointsSpan[destIdx].X = (float)((xraw * cameraToMillXX) - (yraw * cameraToMillXY) + shiftX);
+                                rawPointsSpan[destIdx].Y = (float)((xraw * cameraToMillYX) + (yraw * cameraToMillYY) + shiftY);
                             }
 
                             destIdx += inc;

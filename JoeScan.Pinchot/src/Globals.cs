@@ -22,7 +22,7 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Defined value an XY point will be assigned if it is invalid.
         /// </summary>
-        public const double ProfileDataInvalidXY = double.NaN;
+        public const float ProfileDataInvalidXY = float.NaN;
 
         /// <summary>
         /// The defined value for a brightness measurement if it is invalid.
@@ -68,6 +68,16 @@ namespace JoeScan.Pinchot
         /// TCP data from scan server
         /// </summary>
         internal const int ScanServerDataPort = 12348;
+
+        /// <summary>
+        /// TCP update port
+        /// </summary>
+        internal const int ScanServerUpdatePort = 21232;
+
+        /// <summary>
+        /// TCP update port (legacy)
+        /// </summary>
+        internal const int ScanServerLegacyUpdatePort = 21231;
 
         /// <summary>
         /// ScanSync UDP destination port

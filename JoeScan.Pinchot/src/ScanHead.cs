@@ -3,14 +3,20 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
+using JoeScan.Pinchot.Beta;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 using Client = joescan.schema.client;
+using UpdateClient = joescan.schema.update.client;
+using UpdateServer = joescan.schema.update.server;
 
 namespace JoeScan.Pinchot
 {
@@ -232,6 +238,9 @@ namespace JoeScan.Pinchot
         internal Dictionary<CameraLaserPair, ExclusionMask> ExclusionMasks { get; }
             = new Dictionary<CameraLaserPair, ExclusionMask>();
 
+        internal Dictionary<CameraLaserPair, BrightnessCorrection> BrightnessCorrections { get; }
+            = new Dictionary<CameraLaserPair, BrightnessCorrection>();
+
         [JsonProperty(nameof(Units))]
         internal ScanSystemUnits Units { get; }
 
@@ -295,8 +304,9 @@ namespace JoeScan.Pinchot
             foreach (var pair in CameraLaserPairs)
             {
                 Windows[pair] = ScanWindow.CreateScanWindowUnconstrained();
-                ExclusionMasks[pair] = new ExclusionMask(this);
                 Alignments[pair] = new AlignmentParameters(CameraToMillScale);
+                ExclusionMasks[pair] = new ExclusionMask(this);
+                BrightnessCorrections[pair] = new BrightnessCorrection(this);
             }
         }
 
@@ -430,6 +440,76 @@ namespace JoeScan.Pinchot
         public ScanHeadConfiguration GetConfigurationClone()
         {
             return Configuration.Clone() as ScanHeadConfiguration;
+        }
+
+        /// <summary>
+        /// Blocks until the number of requested <see cref="IProfile"/>s are avilable to be read out.
+        /// </summary>
+        /// <param name="count">Number of <see cref="IProfile"/>s to wait for.</param>
+        /// <param name="timeout">Maximum amount of time to wait.</param>
+        /// <param name="token">Token to observe.</param>
+        /// <returns>
+        /// <see langword="true"/> if the requested number of profiles are available
+        /// or <see langword="false"/> if the timeout elapses or the operation is canceled.
+        /// </returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// <paramref name="count"/> is greater than <see cref="Globals.ProfileQueueSize"/>.
+        /// </exception>
+        /// <seealso cref="NumberOfProfilesAvailable"/>
+        /// <seealso cref="WaitUntilProfilesAvailableAsync(int, TimeSpan, CancellationToken)"/>
+        public bool WaitUntilProfilesAvailable(int count, TimeSpan timeout, CancellationToken token = default)
+        {
+            return WaitUntilProfilesAvailableAsync(count, timeout, token).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Blocks until the number of requested <see cref="IProfile"/>s are avilable to be read out.
+        /// </summary>
+        /// <remarks>
+        /// This function periodically checks the number of available profiles as fast as the system
+        /// clock allows. This is system dependent but is typically ~15 milliseconds.
+        /// </remarks>
+        /// <param name="count">Number of <see cref="IProfile"/>s to wait for.</param>
+        /// <param name="timeout">Maximum amount of time to wait.</param>
+        /// <param name="token">Token to observe.</param>
+        /// <returns>
+        /// <see langword="true"/> if the requested number of profiles are available
+        /// or <see langword="false"/> if the timeout elapses or the operation is canceled.
+        /// </returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// <paramref name="count"/> is greater than <see cref="Globals.ProfileQueueSize"/>.
+        /// </exception>
+        /// <seealso cref="NumberOfProfilesAvailable"/>
+        /// <seealso cref="WaitUntilProfilesAvailable(int, TimeSpan, CancellationToken)"/>
+        public async Task<bool> WaitUntilProfilesAvailableAsync(int count, TimeSpan timeout, CancellationToken token = default)
+        {
+            if (count > Globals.ProfileQueueSize)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count), $"Can't wait for more than {Globals.ProfileQueueSize} profiles.");
+            }
+
+            try
+            {
+                var start = DateTime.Now;
+                while (Profiles.Count < count)
+                {
+                    // `Task.Delay` uses the system clock which has a resolution
+                    // of ~15 ms but try to go as fast as possible
+                    await Task.Delay(1, token);
+
+                    if (DateTime.Now - start > timeout)
+                    {
+                        // timeout
+                        return false;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -593,8 +673,8 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Sets the <see cref="ScanWindow"/>, in mill coordinates, within which a camera will look for
-        /// the laser. Default is an unconstrained window.
+        /// Sets the <see cref="ScanWindow"/> for the scan head. The window restricts
+        /// where the scan head looks for valid points in mill space.
         /// </summary>
         /// <param name="window">The <see cref="ScanWindow"/> to use for the scan head.</param>
         /// <exception cref="InvalidOperationException">
@@ -605,29 +685,55 @@ namespace JoeScan.Pinchot
         /// </exception>
         public void SetWindow(ScanWindow window)
         {
-            if (scanSystem.IsScanning)
-            {
-                throw new InvalidOperationException("Can not set scan window while scanning.");
-            }
-
-            if (window == null)
-            {
-                throw new ArgumentNullException(nameof(window));
-            }
-
-#if NETSTANDARD2_1_OR_GREATER || NET5_0_OR_GREATER
-            foreach (var pair in Windows.Keys)
-#else
+            // TODO: If netstandard2.0 is dropped, the `ToList` can be removed
             foreach (var pair in Windows.Keys.ToList())
-#endif
             {
-                Windows[pair] = window.Clone() as ScanWindow;
+                SetWindow(pair, window);
             }
+        }
 
-            if (IsConnected)
-            {
-                SendAllWindows();
-            }
+        /// <summary>
+        /// Sets the <see cref="ScanWindow"/> for <paramref name="camera"/>. The window
+        /// restricts where the scan head looks for valid points in mill space.
+        /// </summary>
+        /// <param name="camera">The <see cref="Camera"/> to apply the window to.</param>
+        /// <param name="window">The <see cref="ScanWindow"/> to use for the scan head.</param>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// </exception>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="window"/> is null.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// Trying to use a camera-driven function with a laser-driven scan head.
+        /// Use <see cref="SetWindow(Laser, ScanWindow)"/> instead.
+        /// </exception>
+        public void SetWindow(Camera camera, ScanWindow window)
+        {
+            var pair = GetPair(camera);
+            SetWindow(pair, window);
+        }
+
+        /// <summary>
+        /// Sets the <see cref="ScanWindow"/> for <paramref name="laser"/>. The window
+        /// restricts where the scan head looks for valid points in mill space.
+        /// </summary>
+        /// <param name="laser">The <see cref="Laser"/> to apply the window to.</param>
+        /// <param name="window">The <see cref="ScanWindow"/> to use for the scan head.</param>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// </exception>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="window"/> is null.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// Trying to use a laser-driven function with a camera-driven scan head.
+        /// Use <see cref="SetWindow(Camera, ScanWindow)"/> instead.
+        /// </exception>
+        public void SetWindow(Laser laser, ScanWindow window)
+        {
+            var pair = GetPair(laser);
+            SetWindow(pair, window);
         }
 
         /// <summary>
@@ -637,6 +743,8 @@ namespace JoeScan.Pinchot
         /// <returns>A clear <see cref="ExclusionMask"/>.</returns>
         public ExclusionMask CreateExclusionMask()
         {
+            ThrowIfNotVersionCompatible(16, 1, 0);
+
             return new ExclusionMask(this);
         }
 
@@ -657,6 +765,8 @@ namespace JoeScan.Pinchot
         /// </exception>
         public void SetExclusionMask(Camera camera, ExclusionMask mask)
         {
+            ThrowIfNotVersionCompatible(16, 1, 0);
+
             if (scanSystem.IsScanning)
             {
                 throw new InvalidOperationException("Can not set exclusion mask while scanning.");
@@ -698,6 +808,8 @@ namespace JoeScan.Pinchot
         /// </exception>
         public void SetExclusionMask(Laser laser, ExclusionMask mask)
         {
+            ThrowIfNotVersionCompatible(16, 1, 0);
+
             if (scanSystem.IsScanning)
             {
                 throw new InvalidOperationException("Can not set exclusion mask while scanning.");
@@ -735,8 +847,7 @@ namespace JoeScan.Pinchot
         /// </returns>
         /// <remarks>
         /// The auto-exposure mechanism is currently non-functional. The camera exposure
-        /// time will be set to <see cref="ScanHeadConfiguration.DefaultCameraExposureTimeUs"/>
-        /// and the laser on time will be set to <see cref="ScanHeadConfiguration.DefaultLaserOnTimeUs"/>.
+        /// and laser on time will be set to <see cref="ScanHeadConfiguration.DefaultLaserOnTimeUs"/>.
         /// </remarks>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
@@ -751,7 +862,7 @@ namespace JoeScan.Pinchot
         {
             var pair = GetPair(camera);
             return GetDiagnosticProfile(pair,
-                Configuration.DefaultCameraExposureTimeUs,
+                Configuration.DefaultLaserOnTimeUs,
                 Configuration.DefaultLaserOnTimeUs);
         }
 
@@ -793,8 +904,7 @@ namespace JoeScan.Pinchot
         /// </returns>
         /// <remarks>
         /// The auto-exposure mechanism is currently non-functional. The camera exposure
-        /// time will be set to <see cref="ScanHeadConfiguration.DefaultCameraExposureTimeUs"/>
-        /// and the laser on time will be set to <see cref="ScanHeadConfiguration.DefaultLaserOnTimeUs"/>.
+        /// and laser on time will be set to <see cref="ScanHeadConfiguration.DefaultLaserOnTimeUs"/>.
         /// </remarks>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
@@ -809,7 +919,7 @@ namespace JoeScan.Pinchot
         {
             var pair = GetPair(laser);
             return GetDiagnosticProfile(pair,
-                Configuration.DefaultCameraExposureTimeUs,
+                Configuration.DefaultLaserOnTimeUs,
                 Configuration.DefaultLaserOnTimeUs);
         }
 
@@ -1056,6 +1166,109 @@ namespace JoeScan.Pinchot
 
         #region Internal Methods
 
+        /// <summary>
+        /// Checks if the current scan head version is compatible with the version information
+        /// passed in. The version is considered compatible if its version is equal or greater
+        /// than the one supplied.
+        /// </summary>
+        internal bool IsVersionCompatible(int major, int minor, int patch)
+        {
+            if (Version.Major > major)
+            {
+                return true;
+            }
+            else if (Version.Major == major)
+            {
+                if (Version.Minor > minor)
+                {
+                    return true;
+                }
+                else if (Version.Minor == minor && Version.Patch >= patch)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Performs a remote soft power cycle of the scan head.
+        /// </summary>
+        /// <remarks>
+        /// After this function successfully completes, it will take several
+        /// seconds before the scan head will appear on the network and be available
+        /// for use. On average, the scan head will take 30 seconds to reboot.
+        /// </remarks>
+        public void Reboot()
+        {
+            Reboot(SerialNumber);
+        }
+
+        /// <summary>
+        /// Performs a remote soft power cycle of the scan head.
+        /// </summary>
+        /// <param name="serial">The serial of the scan head to power cycle.</param>
+        /// <remarks>
+        /// After this function successfully completes, it will take several
+        /// seconds before the scan head will appear on the network and be available
+        /// for use. On average, the scan head will take 30 seconds to reboot.
+        /// </remarks>
+        public static void Reboot(uint serial)
+        {
+            IPAddress ip;
+            var discoveries = ScanSystem.Discover().GetAwaiter().GetResult();
+            if (!discoveries.ContainsKey(serial))
+            {
+                try
+                {
+                    string host = $"JS-50-{serial}.local";
+                    var hostInfo = Dns.GetHostEntry(host);
+                    ip = hostInfo.AddressList.Single(a => a.AddressFamily == AddressFamily.InterNetwork);
+                }
+                catch
+                {
+                    throw new InvalidOperationException($"Failed to reboot {serial}, not found on network.");
+                }
+            }
+            else
+            {
+                ip = discoveries[serial].IpAddress;
+            }
+
+            using (var updaterTcpClient = new TcpClient(new IPEndPoint(IPAddress.Any, 0)))
+            {
+                updaterTcpClient.Connect(ip, Globals.ScanServerUpdatePort);
+                var updaterStream = updaterTcpClient.GetStream();
+                byte[] rebootRequest = new UpdateClient::MessageClientT { Type = UpdateClient::MessageType.REBOOT_REQUEST }.SerializeToBinary();
+                ScanHeadSenderReceiver.TcpSend(rebootRequest, updaterStream);
+                byte[] rebootBuf = ScanHeadSenderReceiver.TcpRead(updaterStream);
+                var rebootRsp = UpdateServer::MessageServerT.DeserializeFromBinary(rebootBuf);
+                var rebootStatus = rebootRsp.Data.AsStatusData();
+
+                if (rebootStatus.Status != UpdateServer::Status.SUCCESS)
+                {
+                    throw new InvalidOperationException($"Reboot failed for scan head {serial} because {rebootStatus.Status}.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks if the current scan head version is compatible with the version information
+        /// passed in. The version is considered compatible if its version is equal or greater
+        /// than the one supplied. Throws a <see cref="VersionCompatibilityException"/> if
+        /// not compatible.
+        /// </summary>
+        internal void ThrowIfNotVersionCompatible(int major, int minor, int patch, [CallerMemberName] string caller = "")
+        {
+            if (!IsVersionCompatible(major, minor, patch))
+            {
+                string err = $"'{caller}' is not compatible with scan head version {Version}."
+                    + $" Requires {major}.{minor}.{patch} or greater.";
+                throw new VersionCompatibilityException(err);
+            }
+        }
+
         internal void Connect(Client::ConnectionType connType, TimeSpan timeout)
         {
             if (!Enabled)
@@ -1118,6 +1331,30 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
+        /// Internal function for set window implementation.
+        /// </summary>
+        internal void SetWindow(CameraLaserPair pair, ScanWindow window)
+        {
+            if (scanSystem.IsScanning)
+            {
+                throw new InvalidOperationException("Can not set scan window while scanning.");
+            }
+
+            if (window == null)
+            {
+                throw new ArgumentNullException(nameof(window));
+            }
+
+            Windows[pair] = window.Clone() as ScanWindow;
+
+            if (IsConnected)
+            {
+                SendWindow(pair);
+            }
+        }
+
+
+        /// <summary>
         /// Sends the window of each <see cref="CameraLaserPair"/>
         /// </summary>
         internal void SendAllWindows()
@@ -1151,14 +1388,9 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal void SendAllExclusionMasks()
         {
-            if (!Enabled)
-            {
-                return;
-            }
-
             foreach (var pair in CameraLaserPairs)
             {
-                senderReceiver.SendExclusionMask(pair);
+                SendExclusionMask(pair);
             }
         }
 
@@ -1173,6 +1405,24 @@ namespace JoeScan.Pinchot
             }
 
             senderReceiver.SendExclusionMask(pair);
+        }
+
+        internal void SendAllBrightnessCorrections()
+        {
+            foreach (var pair in CameraLaserPairs)
+            {
+                SendBrightnessCorrection(pair);
+            }
+        }
+
+        internal void SendBrightnessCorrection(CameraLaserPair pair)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+
+            senderReceiver.SendBrightnessCorrection(pair);
         }
 
         internal void Disconnect()
@@ -1212,6 +1462,11 @@ namespace JoeScan.Pinchot
         internal void SetScanSystem(ScanSystem scanSystem)
         {
             this.scanSystem = scanSystem;
+        }
+
+        internal ScanSystem GetScanSystem()
+        {
+            return scanSystem;
         }
 
         /// <summary>

@@ -3,6 +3,7 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
+using Newtonsoft.Json;
 using System;
 using System.Diagnostics;
 
@@ -22,25 +23,30 @@ namespace JoeScan.Pinchot
         /// Gets or sets the X coordinate value in <see cref="ScanSystemUnits"/>.
         /// </summary>
         /// <value>The X coordinate value in <see cref="ScanSystemUnits"/>.</value>
-        public double X { get; set; }
+        public float X { get; set; }
 
         /// <summary>
         /// Gets or sets the Y coordinate value in <see cref="ScanSystemUnits"/>.
         /// </summary>
         /// <value>The Y coordinate value in <see cref="ScanSystemUnits"/>.</value>
-        public double Y { get; set; }
+        public float Y { get; set; }
 
+        // NOTE: If we ever serialize profile data as JSON then the [JsonIgnore] will have to go.
+        // This was added since window constraints use this struct and serializing a scan head in
+        // SensorTester added a bunch of junk brightness fields. This will be solved when a new
+        // data type is created for either the constraints or the profile data.
         /// <summary>
         /// Gets or sets the brightness value.
         /// </summary>
         /// <value>The brightness value.</value>
+        [JsonIgnore]
         public int Brightness { get; set; }
 
         /// <summary>
         /// Checks if the point holds valid data.
         /// </summary>
         /// <value><see langword="true"/> if point is valid else <see langword="false"/>.</value>
-        public bool IsValid => !double.IsNaN(Y);
+        public bool IsValid => !float.IsNaN(Y);
 
         #endregion
 
@@ -67,8 +73,8 @@ namespace JoeScan.Pinchot
         /// <param name="y">The Y value in <see cref="ScanSystemUnits"/>.</param>
         public Point2D(double x, double y)
         {
-            X = x;
-            Y = y;
+            X = (float)x;
+            Y = (float)y;
             Brightness = Globals.ProfileDataInvalidBrightness;
         }
 
@@ -93,8 +99,8 @@ namespace JoeScan.Pinchot
         /// <param name="brightness">The brightness value.</param>
         public Point2D(double x, double y, int brightness)
         {
-            X = x;
-            Y = y;
+            X = (float)x;
+            Y = (float)y;
             Brightness = brightness;
         }
 
@@ -169,26 +175,6 @@ namespace JoeScan.Pinchot
         #endregion
 
         #region Internal Methods
-
-        internal double Distance(Point2D p2)
-        {
-            return Math.Sqrt(((X - p2.X) * (X - p2.X)) + ((Y - p2.Y) * (Y - p2.Y)));
-        }
-
-        internal double Distance(double x, double y)
-        {
-            return Math.Sqrt(((X - x) * (X - x)) + ((Y - y) * (Y - y)));
-        }
-
-        internal double DistanceSq(double x, double y)
-        {
-            return ((X - x) * (X - x)) + ((Y - y) * (Y - y));
-        }
-
-        internal double DistanceSq(Point2D p2)
-        {
-            return ((X - p2.X) * (X - p2.X)) + ((Y - p2.Y) * (Y - p2.Y));
-        }
 
         /// <summary>
         /// Returns the hash code for this instance.

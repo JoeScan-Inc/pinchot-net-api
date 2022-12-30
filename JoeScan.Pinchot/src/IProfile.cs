@@ -58,9 +58,9 @@ namespace JoeScan.Pinchot
         Span<Point2D> RawPoints { get; }
 
         /// <summary>
-        /// Gets the number of valid <see cref="Point2D"/>s in <see cref="RawPoints"/>.
+        /// Gets the number of valid <see cref="Point2D"/>s in the profile.
         /// </summary>
-        /// <value>The number of valid <see cref="Point2D"/>s in <see cref="RawPoints"/>.</value>
+        /// <value>The number of valid <see cref="Point2D"/>s in the profile.</value>
         uint ValidPointCount { get; }
 
         /// <summary>

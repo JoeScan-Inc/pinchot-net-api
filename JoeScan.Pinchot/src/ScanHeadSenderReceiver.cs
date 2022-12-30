@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -80,6 +81,8 @@ namespace JoeScan.Pinchot
         internal long IncompleteProfilesReceivedCount { get; private set; }
 
         internal long BadPacketsCount { get; private set; }
+
+        internal Exception TcpException { get; private set; }
 
         #endregion
 
@@ -213,6 +216,12 @@ namespace JoeScan.Pinchot
         {
             byte[] maskReq = CreateExclusionMaskRequest(pair);
             TcpSend(maskReq, TcpControlStream);
+        }
+
+        internal void SendBrightnessCorrection(CameraLaserPair pair)
+        {
+            byte[] correctionReq = CreateBrightnessCorrectionRequest(pair);
+            TcpSend(correctionReq, TcpControlStream);
         }
 
         internal void StartScanning(uint periodUs, AllDataFormat dataFormat)
@@ -542,11 +551,26 @@ namespace JoeScan.Pinchot
 
                     while (current < expected)
                     {
+                        try
+                        {
 #if NETSTANDARD2_1_OR_GREATER || NET5_0_OR_GREATER
-                        current += await TcpDataStream.ReadAsync(tcpDataReceiveMemory[current..expected], token).ConfigureAwait(false);
+                            current += await TcpDataStream.ReadAsync(tcpDataReceiveMemory[current..expected], token).ConfigureAwait(false);
 #else
-                        current += await TcpDataStream.ReadAsync(tcpDataReceiveBuffer, current, expected - current, token).ConfigureAwait(false);
+                            current += await TcpDataStream.ReadAsync(tcpDataReceiveBuffer, current, expected - current, token).ConfigureAwait(false);
 #endif
+                        }
+                        catch (IOException e) when (e.InnerException is SocketException se)
+                        {
+                            switch (se.SocketErrorCode)
+                            {
+                                case SocketError.Interrupted:
+                                case SocketError.TryAgain:
+                                case SocketError.WouldBlock:
+                                    continue;
+                                default:
+                                    throw;
+                            }
+                        }
                     }
 
                     // read data
@@ -559,11 +583,26 @@ namespace JoeScan.Pinchot
                     current = 0;
                     while (current < expected)
                     {
+                        try
+                        {
 #if NETSTANDARD2_1_OR_GREATER || NET5_0_OR_GREATER
-                        current += await TcpDataStream.ReadAsync(tcpDataReceiveMemory[current..expected], token).ConfigureAwait(false);
+                            current += await TcpDataStream.ReadAsync(tcpDataReceiveMemory[current..expected], token).ConfigureAwait(false);
 #else
-                        current += await TcpDataStream.ReadAsync(tcpDataReceiveBuffer, current, expected - current, token).ConfigureAwait(false);
+                            current += await TcpDataStream.ReadAsync(tcpDataReceiveBuffer, current, expected - current, token).ConfigureAwait(false);
 #endif
+                        }
+                        catch (IOException e) when (e.InnerException is SocketException se)
+                        {
+                            switch (se.SocketErrorCode)
+                            {
+                                case SocketError.Interrupted:
+                                case SocketError.TryAgain:
+                                case SocketError.WouldBlock:
+                                    continue;
+                                default:
+                                    throw;
+                            }
+                        }
                     }
 
                     byte[] packet = tcpDataReceiveBuffer;
@@ -601,13 +640,12 @@ namespace JoeScan.Pinchot
                     lastTimestamp = dataHeader.TimestampNs;
                 }
             }
-            catch (ObjectDisposedException) { }
-            catch (SocketException) { }
-            catch (OperationCanceledException) { }
-            catch (Exception)
+            catch (Exception e)
             {
-                // TODO: Remove the throw after testing TCP
-                throw;
+                // TODO: Handle this in a better way
+                // We can either try to reconnect or disconnect
+                // and let the user know something happened.
+                TcpException = e;
             }
         }
 
@@ -694,10 +732,10 @@ namespace JoeScan.Pinchot
             var window = scanHead.Windows[pair];
             var alignment = scanHead.Alignments[pair];
 
-            foreach (var wc in window.WindowConstraints)
+            foreach (var (wc0, wc1) in window.WindowConstraints)
             {
-                var p0Prime = alignment.MillToCamera(wc.X0, wc.Y0, 0);
-                var p1Prime = alignment.MillToCamera(wc.X1, wc.Y1, 0);
+                var p0Prime = alignment.MillToCamera(wc0.X, wc0.Y, 0);
+                var p1Prime = alignment.MillToCamera(wc1.X, wc1.Y, 0);
                 bool isCableDownstream = alignment.Orientation == ScanHeadOrientation.CableIsDownstream;
                 var p0 = isCableDownstream ? p0Prime : p1Prime;
                 var p1 = isCableDownstream ? p1Prime : p0Prime;
@@ -743,6 +781,29 @@ namespace JoeScan.Pinchot
                         CameraPort = scanHead.CameraIdToPort(pair.Camera),
                         LaserPort = scanHead.LaserIdToPort(pair.Laser),
                         Mask = mask.GetMask().ToList()
+                    }
+                }
+            };
+
+            return message.SerializeToBinary();
+        }
+
+        private byte[] CreateBrightnessCorrectionRequest(CameraLaserPair pair)
+        {
+            var correction = scanHead.BrightnessCorrections[pair];
+
+            var message = new Client::MessageClientT
+            {
+                Type = Client::MessageType.BRIGHTNESS_CORRECTION,
+                Data = new Client::MessageDataUnion
+                {
+                    Type = Client.MessageData.BrightnessCorrectionData,
+                    Value = new Client::BrightnessCorrectionDataT
+                    {
+                        CameraPort = scanHead.CameraIdToPort(pair.Camera),
+                        LaserPort = scanHead.LaserIdToPort(pair.Laser),
+                        ImageOffset = correction.Offset,
+                        ScaleFactors = correction.GetScaleFactors(),
                     }
                 }
             };

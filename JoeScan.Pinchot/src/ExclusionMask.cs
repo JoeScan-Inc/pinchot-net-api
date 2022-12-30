@@ -6,7 +6,7 @@ namespace JoeScan.Pinchot
     /// <summary>
     /// An exclusion mask determines which pixels on the sensor image should be ignored.
     /// </summary>
-    public class ExclusionMask
+    public class ExclusionMask : ICloneable
     {
         /// <summary>
         /// The bit array of the exclusion mask. This is easier to use
