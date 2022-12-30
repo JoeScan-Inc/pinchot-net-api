@@ -124,7 +124,15 @@ namespace JoeScan.Pinchot
         /// <returns>A <see cref="IEnumerable{Point2D}"/> of the valid <see cref="Point2D"/>s in the <see cref="Profile"/>.</returns>
         public IEnumerable<Point2D> GetValidXYPoints()
         {
-            return RawPoints.ToArray().Where(q => !double.IsNaN(q.Y));
+            int stride = GetDataStride();
+            for (int i = 0; i < RawPoints.Length; i += stride)
+            {
+                var p = RawPoints[i];
+                if (p.IsValid)
+                {
+                    yield return p;
+                }
+            }
         }
 
         /// <summary>
@@ -145,15 +153,15 @@ namespace JoeScan.Pinchot
                     nameof(validPoints));
             }
 
-            int i = 0;
-            foreach (var point in RawPoints)
+            int validIdx = 0;
+            int stride = GetDataStride();
+            for (int i = 0; i < RawPoints.Length; i += stride)
             {
-                if (double.IsNaN(point.Y))
+                var p = RawPoints[i];
+                if (p.IsValid)
                 {
-                    continue;
+                    validPoints[validIdx++] = p;
                 }
-
-                validPoints[i++] = point;
             }
         }
 
@@ -169,6 +177,26 @@ namespace JoeScan.Pinchot
         #endregion
 
         #region Internal Methods
+
+        internal int GetDataStride()
+        {
+            switch (AllDataFormat)
+            {
+                case AllDataFormat.XYFull:
+                case AllDataFormat.XYFullLMFull:
+                case AllDataFormat.Subpixel:
+                case AllDataFormat.SubpixelFullLMFull:
+                    return 1;
+                case AllDataFormat.XYHalf:
+                case AllDataFormat.XYHalfLMHalf:
+                    return 2;
+                case AllDataFormat.XYQuarter:
+                case AllDataFormat.XYQuarterLMQuarter:
+                    return 4;
+                default:
+                    throw new InvalidOperationException($"Unknown data stride for {AllDataFormat}");
+            }
+        }
 
         internal Profile(BinaryReader reader)
             : this()
@@ -194,8 +222,8 @@ namespace JoeScan.Pinchot
             var rawPointsArray = new Point2D[numberPoints];
             for (int i = 0; i < numberPoints; i++)
             {
-                double x = reader.ReadDouble();
-                double y = reader.ReadDouble();
+                float x = (float)reader.ReadDouble();
+                float y = (float)reader.ReadDouble();
                 int brightness = reader.ReadInt32();
                 rawPointsArray[i] = new Point2D(x, y, brightness);
             }
@@ -205,8 +233,8 @@ namespace JoeScan.Pinchot
             CameraCoordinates = new Point2D[numSubpixelValues];
             for (int i = 0; i < numSubpixelValues; i++)
             {
-                double x = reader.ReadDouble();
-                double y = reader.ReadDouble();
+                float x = (float)reader.ReadDouble();
+                float y = (float)reader.ReadDouble();
                 int brightness = reader.ReadInt32();
                 CameraCoordinates[i] = new Point2D(x, y, brightness);
             }
@@ -232,8 +260,8 @@ namespace JoeScan.Pinchot
             bw.Write(rawPointsArray.Length);
             foreach (var pt in rawPointsArray)
             {
-                bw.Write(pt.X);
-                bw.Write(pt.Y);
+                bw.Write((double)pt.X);
+                bw.Write((double)pt.Y);
                 bw.Write(pt.Brightness);
             }
 

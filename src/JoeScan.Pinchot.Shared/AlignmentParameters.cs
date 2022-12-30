@@ -67,14 +67,14 @@ namespace JoeScan.Pinchot
         /// Set during initialization of a new instance of a <see cref="AlignmentParameters"/> object.
         /// </summary>
         [JsonProperty(nameof(ShiftX))]
-        internal double ShiftX { get; }
+        internal double ShiftX { get; set; }
 
         /// <summary>
         /// Gets the translation along the Y axis in the mill coordinate system in inches.
         /// Set during initialization of a new instance of a <see cref="AlignmentParameters"/> object.
         /// </summary>
         [JsonProperty(nameof(ShiftY))]
-        internal double ShiftY { get; private set; }
+        internal double ShiftY { get; set; }
 
         internal double SinRoll { get; private set; }
 

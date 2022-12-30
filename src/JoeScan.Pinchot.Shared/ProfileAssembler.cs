@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace JoeScan.Pinchot
 {
@@ -16,8 +17,9 @@ namespace JoeScan.Pinchot
         private readonly AllDataFormat dataFormat;
         private readonly IDictionary<Camera, AlignmentParameters> alignmentParameters;
         private readonly BlockingCollection<Profile> profiles;
-        private const int RawPointsArrayCapacity = 100;
-        private Point2D[] rawPointsArray;
+        private const int NumProfilesToBuffer = 100;
+        private readonly Point2D[] defaultPointsArray;
+        private readonly Point2D[] rawPointsArray;
         private int rawPointsArrayIndex;
 
         #endregion
@@ -36,7 +38,18 @@ namespace JoeScan.Pinchot
             this.dataFormat = dataFormat;
             this.profiles = profiles;
             this.alignmentParameters = alignmentParameters;
-            rawPointsArray = new Point2D[RawPointsArrayCapacity * Globals.RawProfileDataLength];
+
+            var defaultPoint = new Point2D
+            {
+                X = float.NaN,
+                Y = float.NaN,
+                Brightness = Globals.ProfileDataInvalidBrightness
+            };
+
+            // keep copy of default array to save on computation time
+            // when raw points array needs to be reset
+            defaultPointsArray = Enumerable.Repeat(defaultPoint, NumProfilesToBuffer * Globals.RawProfileDataLength).ToArray();
+            rawPointsArray = defaultPointsArray.Clone() as Point2D[];
             rawPointsArrayIndex = 0;
         }
 
@@ -80,27 +93,26 @@ namespace JoeScan.Pinchot
             var seedPacket = fragments[0];
             var p = CreateNewProfile(seedPacket);
 
-            if (rawPointsArrayIndex >= RawPointsArrayCapacity)
+            if (rawPointsArrayIndex >= NumProfilesToBuffer)
             {
-                rawPointsArray = new Point2D[RawPointsArrayCapacity * Globals.RawProfileDataLength];
+                defaultPointsArray.CopyTo(rawPointsArray, 0);
                 rawPointsArrayIndex = 0;
             }
 
             p.RawPointsMemory = new Memory<Point2D>(rawPointsArray, rawPointsArrayIndex * Globals.RawProfileDataLength,
                 Globals.RawProfileDataLength);
             var rawPointsSpan = p.RawPointsMemory.Span;
-            rawPointsSpan.Fill(new Point2D(double.NaN, double.NaN, Globals.ProfileDataInvalidBrightness));
 
             var tr = alignmentParameters[seedPacket.Camera];
             double sinRoll = tr.SinRoll;
             double cosRoll = tr.CosRoll;
             double cosYaw = tr.CosYaw;
-            double shiftX = tr.ShiftX;
-            double shiftY = tr.ShiftY;
-            double xXCoefficient = cosYaw * cosRoll / 1000;
-            double xYCoefficient = sinRoll / 1000;
-            double yXCoefficient = cosYaw * sinRoll / 1000;
-            double yYCoefficient = cosRoll / 1000;
+            float shiftX = (float)tr.ShiftX;
+            float shiftY = (float)tr.ShiftY;
+            float xXCoefficient = (float)(cosYaw * cosRoll / 1000);
+            float xYCoefficient = (float)(sinRoll / 1000);
+            float yXCoefficient = (float)(cosYaw * sinRoll / 1000);
+            float yYCoefficient = (float)(cosRoll / 1000);
 
             foreach (var currentFragment in fragments)
             {
