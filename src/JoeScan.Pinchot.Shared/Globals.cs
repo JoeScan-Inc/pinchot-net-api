@@ -8,7 +8,7 @@ namespace JoeScan.Pinchot
     /// <summary>
     /// Globally available variables.
     /// </summary>
-    internal static class Globals
+    public static class Globals
     {
         /// <summary>
         /// The max scan rate
