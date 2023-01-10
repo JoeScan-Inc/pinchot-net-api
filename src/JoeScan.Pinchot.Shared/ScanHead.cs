@@ -104,6 +104,13 @@ namespace JoeScan.Pinchot
         /// <value>A value indicating whether the <see cref="ScanHead"/> profile buffer overflowed.</value>
         [JsonIgnore]
         public bool ProfileBufferOverflowed => senderReceiver.ProfileBufferOverflowed;
+        
+        
+        /// <summary>
+        /// Gets the thread safe collection of profiles received from the scan head.
+        /// </summary>
+        public BlockingCollection<Profile> Profiles { get; } =
+            new BlockingCollection<Profile>(new ConcurrentQueue<Profile>(), Globals.ProfileBufferSize);
 
         #endregion
 
@@ -130,12 +137,6 @@ namespace JoeScan.Pinchot
         /// Enable / disable network communication statistics.
         /// </summary>
         internal bool CommStatsEnabled => scanSystem.CommStatsEnabled;
-
-        /// <summary>
-        /// Gets the thread safe collection of profiles received from the scan head.
-        /// </summary>
-        internal BlockingCollection<Profile> Profiles { get; } =
-            new BlockingCollection<Profile>(new ConcurrentQueue<Profile>(), Globals.ProfileBufferSize);
 
         /// <summary>
         /// Gets the spatial transformation parameters of the scan head required to
