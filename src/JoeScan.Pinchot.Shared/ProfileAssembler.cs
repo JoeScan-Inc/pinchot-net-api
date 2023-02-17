@@ -17,9 +17,8 @@ namespace JoeScan.Pinchot
         private readonly AllDataFormat dataFormat;
         private readonly IDictionary<Camera, AlignmentParameters> alignmentParameters;
         private readonly BlockingCollection<Profile> profiles;
-        private const int NumProfilesToBuffer = 100;
-        private readonly Point2D[] defaultPointsArray;
-        private readonly Point2D[] rawPointsArray;
+        private const int RawPointsArrayCapacity = 100;
+        private Point2D[] rawPointsArray;
         private int rawPointsArrayIndex;
 
         #endregion
@@ -38,18 +37,7 @@ namespace JoeScan.Pinchot
             this.dataFormat = dataFormat;
             this.profiles = profiles;
             this.alignmentParameters = alignmentParameters;
-
-            var defaultPoint = new Point2D
-            {
-                X = float.NaN,
-                Y = float.NaN,
-                Brightness = Globals.ProfileDataInvalidBrightness
-            };
-
-            // keep copy of default array to save on computation time
-            // when raw points array needs to be reset
-            defaultPointsArray = Enumerable.Repeat(defaultPoint, NumProfilesToBuffer * Globals.RawProfileDataLength).ToArray();
-            rawPointsArray = defaultPointsArray.Clone() as Point2D[];
+            rawPointsArray = new Point2D[RawPointsArrayCapacity * Globals.RawProfileDataLength];
             rawPointsArrayIndex = 0;
         }
 
@@ -93,9 +81,9 @@ namespace JoeScan.Pinchot
             var seedPacket = fragments[0];
             var p = CreateNewProfile(seedPacket);
 
-            if (rawPointsArrayIndex >= NumProfilesToBuffer)
+            if (rawPointsArrayIndex >= RawPointsArrayCapacity)
             {
-                defaultPointsArray.CopyTo(rawPointsArray, 0);
+                rawPointsArray = new Point2D[RawPointsArrayCapacity * Globals.RawProfileDataLength];
                 rawPointsArrayIndex = 0;
             }
 
