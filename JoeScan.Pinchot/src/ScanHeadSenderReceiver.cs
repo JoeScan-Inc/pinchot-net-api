@@ -226,6 +226,8 @@ namespace JoeScan.Pinchot
 
         internal void StartScanning(uint periodUs, AllDataFormat dataFormat)
         {
+            ProfileBufferOverflowed = false;
+
             profileAssembler = new ProfileAssembler(scanHead, dataFormat);
             idleSkipCount = scanHead.Configuration.IdleScanPeriodUs / periodUs;
 

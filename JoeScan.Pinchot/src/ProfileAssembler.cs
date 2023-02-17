@@ -4,7 +4,6 @@
 // root for license information.
 
 using System;
-using System.Linq;
 
 namespace JoeScan.Pinchot
 {
@@ -15,8 +14,7 @@ namespace JoeScan.Pinchot
         private readonly ScanHead scanHead;
         private readonly AllDataFormat dataFormat;
         private const int NumProfilesToBuffer = 100;
-        private readonly Point2D[] defaultPointsArray;
-        private readonly Point2D[] rawPointsArray;
+        private Point2D[] rawPointsArray;
         private int rawPointsArrayIndex;
         private AlignmentParameters alignment;
 
@@ -29,17 +27,7 @@ namespace JoeScan.Pinchot
             this.dataFormat = dataFormat;
             this.scanHead = scanHead;
 
-            var defaultPoint = new Point2D
-            {
-                X = Globals.ProfileDataInvalidXY,
-                Y = Globals.ProfileDataInvalidXY,
-                Brightness = Globals.ProfileDataInvalidBrightness
-            };
-
-            // keep copy of default array to save on computation time
-            // when raw points array needs to be reset
-            defaultPointsArray = Enumerable.Repeat(defaultPoint, NumProfilesToBuffer * Globals.RawProfileDataLength).ToArray();
-            rawPointsArray = defaultPointsArray.Clone() as Point2D[];
+            rawPointsArray = new Point2D[NumProfilesToBuffer * Globals.RawProfileDataLength];
             rawPointsArrayIndex = 0;
         }
 
@@ -72,7 +60,10 @@ namespace JoeScan.Pinchot
             rawPointsArrayIndex++;
             if (rawPointsArrayIndex >= NumProfilesToBuffer)
             {
-                defaultPointsArray.CopyTo(rawPointsArray, 0);
+                // need to `new` the array in case there are profiles yet to be read out
+                // that have references to the previous spots in memory - the memory will
+                // then be GC'd when the profile goes out of scope
+                rawPointsArray = new Point2D[NumProfilesToBuffer * Globals.RawProfileDataLength];
                 rawPointsArrayIndex = 0;
             }
 
@@ -102,56 +93,80 @@ namespace JoeScan.Pinchot
             double shiftX = alignment.ShiftX;
             double shiftY = alignment.ShiftY;
 
-            foreach (var dt in dataTypes.GetFlags())
+            if (dataTypes.HasFlag(DataType.XY))
             {
-                var layout = header.FragmentLayouts[dt];
-                int numVals = layout.numVals;
-                int step = layout.step;
-                int srcIdx = layout.offset;
-
-                int inc = (int)(totalParts * step);
-                int destIdx = (int)(startCol + (partNum * step));
-
-                switch (dt)
+                // Brightness is always accompanied by XY data so
+                // process them both in the same loop if present
+                int bSrc = 0;
+                bool hasBrightness = dataTypes.HasFlag(DataType.Brightness);
+                if (hasBrightness)
                 {
-                    case DataType.Brightness:
-                        for (int j = 0; j < numVals; j++)
-                        {
-                            rawPointsSpan[destIdx].Brightness = packet[srcIdx];
-                            ++srcIdx;
-                            destIdx += inc;
-                        }
-                        break;
-                    case DataType.XY:
-                        for (int j = 0; j < numVals; j++)
-                        {
-                            short xraw = (short)(packet[srcIdx + 1] | (packet[srcIdx] << 8));
-                            short yraw = (short)(packet[srcIdx + 3] | (packet[srcIdx + 2] << 8));
-                            srcIdx += 4;
-
-                            if (xraw != Globals.ServerProfileDataInvalidXY && yraw != Globals.ServerProfileDataInvalidXY)
-                            {
-                                profile.ValidPointCount++;
-                                rawPointsSpan[destIdx].X = (float)((xraw * cameraToMillXX) - (yraw * cameraToMillXY) + shiftX);
-                                rawPointsSpan[destIdx].Y = (float)((xraw * cameraToMillYX) + (yraw * cameraToMillYY) + shiftY);
-                            }
-
-                            destIdx += inc;
-                        }
-                        break;
-                    case DataType.Subpixel:
-                        for (int j = 0; j < numVals; j++)
-                        {
-                            short rowPixel = (short)(packet[srcIdx + 1] | (packet[srcIdx] << 8));
-                            srcIdx += 2;
-
-                            profile.CameraCoordinates[destIdx] = new Point2D(rowPixel, destIdx, rawPointsSpan[destIdx].Brightness);
-                            destIdx += inc;
-                        }
-                        break;
-                    default:
-                        throw new InvalidOperationException($"DataType {dt} is unhandled!");
+                    var bLayout = header.FragmentLayouts[DataType.Brightness];
+                    bSrc = bLayout.offset;
                 }
+
+                var xyLayout = header.FragmentLayouts[DataType.XY];
+                int xySrc = xyLayout.offset;
+
+                // assume step and number of values is same for brightness and XY layout
+                int numVals = xyLayout.numVals;
+                int step = xyLayout.step;
+                int inc = (int)(totalParts * step);
+                int dstIdx = (int)(startCol + (partNum * step));
+
+                for (int j = 0; j < numVals; j++)
+                {
+                    short xraw = (short)(packet[xySrc + 1] | (packet[xySrc] << 8));
+                    short yraw = (short)(packet[xySrc + 3] | (packet[xySrc + 2] << 8));
+                    xySrc += 4;
+
+                    int brightness = hasBrightness ? packet[bSrc] : Globals.ProfileDataInvalidBrightness;
+                    bSrc++;
+
+                    if (xraw != Globals.ServerProfileDataInvalidXY && yraw != Globals.ServerProfileDataInvalidXY)
+                    {
+                        profile.ValidPointCount++;
+                        rawPointsSpan[dstIdx].X = (float)((xraw * cameraToMillXX) - (yraw * cameraToMillXY) + shiftX);
+                        rawPointsSpan[dstIdx].Y = (float)((xraw * cameraToMillYX) + (yraw * cameraToMillYY) + shiftY);
+                        rawPointsSpan[dstIdx].Brightness = brightness;
+                    }
+                    else
+                    {
+                        rawPointsSpan[dstIdx].X = Globals.ProfileDataInvalidXY;
+                        rawPointsSpan[dstIdx].Y = Globals.ProfileDataInvalidXY;
+                        rawPointsSpan[dstIdx].Brightness = Globals.ProfileDataInvalidBrightness;
+                    }
+
+                    dstIdx += inc;
+                }
+            }
+            else if (dataTypes.HasFlag(DataType.Subpixel))
+            {
+                var spLayout = header.FragmentLayouts[DataType.Subpixel];
+                int spSrc = spLayout.offset;
+                var bLayout = header.FragmentLayouts[DataType.Brightness];
+                int bSrc = bLayout.offset;
+
+                int numVals = spLayout.numVals;
+                int step = spLayout.step;
+                int inc = (int)(totalParts * step);
+                int dstIdx = (int)(startCol + (partNum * step));
+                for (int j = 0; j < numVals; j++)
+                {
+                    short rowPixel = (short)(packet[spSrc + 1] | (packet[spSrc] << 8));
+                    spSrc += 2;
+
+                    int brightness = packet[bSrc];
+                    bSrc++;
+
+                    profile.CameraCoordinates[dstIdx] = new Point2D(rowPixel, dstIdx, brightness);
+
+                    dstIdx += inc;
+                }
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unhandled data type in {dataTypes.GetFlags()}!");
             }
 
             return ++profile.PacketsReceived == profile.PacketsExpected;
