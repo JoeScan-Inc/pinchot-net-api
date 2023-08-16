@@ -98,7 +98,7 @@ namespace JoeScan.Pinchot
                 Client = { ReceiveBufferSize = Globals.ReceiveDataBufferSize }
             };
 
-            tcpControlClient = new TcpClient(new IPEndPoint(IPAddress.Any, 0))
+            tcpControlClient = new TcpClient(new IPEndPoint(scanHead.ClientIpAddress, 0))
             {
                 // disable Nagle's algorithm since we are going to be sending tiny header
                 // packets with each TCP transmission and don't want that to be delayed
@@ -106,7 +106,7 @@ namespace JoeScan.Pinchot
             };
 
             tcpDataReceiveMemory = new Memory<byte>(tcpDataReceiveBuffer);
-            tcpDataClient = new TcpClient(new IPEndPoint(IPAddress.Any, 0))
+            tcpDataClient = new TcpClient(new IPEndPoint(scanHead.ClientIpAddress, 0))
             {
                 ReceiveBufferSize = Globals.ReceiveDataBufferSize
             };

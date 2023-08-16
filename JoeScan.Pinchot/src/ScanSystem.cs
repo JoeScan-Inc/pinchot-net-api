@@ -323,6 +323,7 @@ namespace JoeScan.Pinchot
                 // was created (physical scan head was unplugged/plugged back in, scan system
                 // is being loaded from JSON, etc.)
                 sh.IpAddress = discovery.IpAddress;
+                sh.ClientIpAddress = discovery.ClientIpAddress;
                 sh.Version = discovery.Version;
             }
 

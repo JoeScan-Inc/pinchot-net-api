@@ -98,6 +98,18 @@ namespace JoeScan.Pinchot
         public IPAddress IpAddress { get; internal set; }
 
         /// <summary>
+        /// Gets the <see cref="IPAddress"/> of the client machine's NIC that received the broadcast.
+        /// </summary>
+        /// <value>The client machine's <see cref="IPAddress"/> which discovered the scan head.</value>
+        /// <remarks>
+        /// The property is used when making a TCP connection between the client machine and a scan head.
+        /// This is particularly important on computers that have multiple NICs or a NIC with dual ports.
+        /// Whichever NIC discovered the scan head should be responsible for making the connection.
+        /// </remarks>
+        [JsonIgnore]
+        public IPAddress ClientIpAddress { get; internal set; }
+
+        /// <summary>
         /// Gets a value indicating whether the network connection to the scan head is established.
         /// </summary>
         /// <value>A value indicating whether the network connection to the scan head is established.</value>
@@ -285,6 +297,7 @@ namespace JoeScan.Pinchot
         {
             this.scanSystem = scanSystem;
             IpAddress = device.IpAddress;
+            ClientIpAddress = device.ClientIpAddress;
             Version = device.Version;
         }
 
@@ -1067,7 +1080,8 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// <paramref name="laserOnTimeUs"/> is too long or too short.
         /// </exception>
-        public CameraImage GetDiagnosticCameraImage(Camera camera, uint cameraExposureUs, Laser laser, uint laserOnTimeUs)
+        public CameraImage GetDiagnosticCameraImage(Camera camera, uint cameraExposureUs, Laser laser, uint laserOnTimeUs,
+            Client::ImageDataType imageDataType = Client.ImageDataType.MERGED_MASK_IMAGE)
         {
             if (!IsConnected)
             {
@@ -1115,6 +1129,7 @@ namespace JoeScan.Pinchot
                 LaserOnTimeNs = laserOnTimeUs * 1000,
                 LaserDetectionThreshold = Configuration.LaserDetectionThreshold,
                 SaturationThreshold = Configuration.SaturationThreshold,
+                ImageDataType = imageDataType,
             };
 
             var img = senderReceiver.RequestDiagnosticImage(req);
@@ -1217,6 +1232,7 @@ namespace JoeScan.Pinchot
         public static void Reboot(uint serial)
         {
             IPAddress ip;
+            IPAddress clientIp;
             var discoveries = ScanSystem.Discover().GetAwaiter().GetResult();
             if (!discoveries.ContainsKey(serial))
             {
@@ -1225,6 +1241,7 @@ namespace JoeScan.Pinchot
                     string host = $"JS-50-{serial}.local";
                     var hostInfo = Dns.GetHostEntry(host);
                     ip = hostInfo.AddressList.Single(a => a.AddressFamily == AddressFamily.InterNetwork);
+                    clientIp = IPAddress.Any;
                 }
                 catch
                 {
@@ -1234,9 +1251,10 @@ namespace JoeScan.Pinchot
             else
             {
                 ip = discoveries[serial].IpAddress;
+                clientIp = discoveries[serial].ClientIpAddress;
             }
 
-            using (var updaterTcpClient = new TcpClient(new IPEndPoint(IPAddress.Any, 0)))
+            using (var updaterTcpClient = new TcpClient(new IPEndPoint(clientIp, 0)))
             {
                 updaterTcpClient.Connect(ip, Globals.ScanServerUpdatePort);
                 var updaterStream = updaterTcpClient.GetStream();

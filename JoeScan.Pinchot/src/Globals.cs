@@ -10,7 +10,7 @@ namespace JoeScan.Pinchot
     /// <summary>
     /// Globally available variables.
     /// </summary>
-    public static class Globals
+    internal static class Globals
     {
         #region Public Fields
 
