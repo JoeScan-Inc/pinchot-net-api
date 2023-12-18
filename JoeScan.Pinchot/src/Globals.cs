@@ -3,14 +3,12 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using System;
-
 namespace JoeScan.Pinchot
 {
     /// <summary>
     /// Globally available variables.
     /// </summary>
-    internal static class Globals
+    public static class Globals
     {
         #region Public Fields
 
@@ -85,11 +83,6 @@ namespace JoeScan.Pinchot
         internal const int ScanSyncClientPort = 11234;
 
         /// <summary>
-        /// ScanSync UDP server origin port
-        /// </summary>
-        internal const int ScanSyncServerPort = 62510;
-
-        /// <summary>
         /// Buffer size for receiving data packets from scan server
         /// </summary>
         internal const int ReceiveDataBufferSize = 0x10000000;
@@ -98,6 +91,12 @@ namespace JoeScan.Pinchot
         /// Profile buffer size (per scan head)
         /// </summary>
         internal const int ProfileQueueSize = 1000;
+
+        /// <summary>
+        /// Smallest period per element per scan head required to
+        /// not violate the maximum throughput of profiles
+        /// </summary>
+        internal const int MinScanPeriodPerElementUs = 250;
 
         #endregion
     }

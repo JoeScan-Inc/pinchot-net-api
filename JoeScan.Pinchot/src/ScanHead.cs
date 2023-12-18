@@ -37,12 +37,8 @@ namespace JoeScan.Pinchot
         private bool disposed;
         private ProductType type;
         private ScanHeadOrientation orientation;
-
-        #endregion
-
-        #region Events
-
-        internal event EventHandler<CommStatsEventArgs> StatsEvent;
+        private DirtyStateFlags dirtyState;
+        private ScanningMode mode;
 
         #endregion
 
@@ -130,6 +126,8 @@ namespace JoeScan.Pinchot
                 {
                     alignment.Value.Orientation = value;
                 }
+
+                FlagDirty(DirtyStateFlags.Window);
             }
         }
 
@@ -144,8 +142,10 @@ namespace JoeScan.Pinchot
         /// Gets the number of <see cref="IProfile"/>s available in the local buffer for the scan head.
         /// </summary>
         /// <remarks>
-        /// All existing <see cref="IProfile"/>s are cleared from the local buffer when <see cref="ScanSystem.StartScanning(uint, DataFormat)"/>
+        /// All existing <see cref="IProfile"/>s are cleared from the local buffer when <see cref="ScanSystem.StartScanning(uint, DataFormat, ScanningMode)"/>
         /// is called successfully.
+        /// <br/>
+        /// This value means nothing when scanning with <see cref="ScanningMode.Frame"/>.
         /// </remarks>
         /// <value>The number of <see cref="IProfile"/>s available in the local buffer for the scan head.</value>
         [JsonIgnore]
@@ -154,10 +154,10 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Gets a value indicating whether the scan head profile buffer overflowed.
         /// </summary>
-        /// <remarks>Resets to <see langword="false"/> when <see cref="ScanSystem.StartScanning(uint, DataFormat)"/> is called successfully.</remarks>
+        /// <remarks>Resets to <see langword="false"/> when <see cref="ScanSystem.StartScanning(uint, DataFormat, ScanningMode)"/> is called successfully.</remarks>
         /// <value>A value indicating whether the scan head profile buffer overflowed.</value>
         [JsonIgnore]
-        public bool ProfileBufferOverflowed => senderReceiver.ProfileBufferOverflowed;
+        public bool ProfileBufferOverflowed => senderReceiver.ProfileBufferOverflowed || QueueManager.FrameQueueOverflowed;
 
         /// <summary>
         /// Gets an <see cref="IEnumerable{T}"/> that can be used to iterate over all valid cameras.
@@ -197,9 +197,6 @@ namespace JoeScan.Pinchot
 
         #region Internal Properties
 
-        [JsonProperty(nameof(Enabled))]
-        internal bool Enabled { get; set; } = true;
-
         /// <summary>
         /// The most recent <see cref="ScanHeadStatus"/> received from a call to <see cref="RequestStatus"/>.
         /// </summary>
@@ -218,21 +215,29 @@ namespace JoeScan.Pinchot
             = new ScanHeadConfiguration();
 
         /// <summary>
-        /// Network communication statistics for the scan head.
+        /// Gets or sets the <see cref="ScanningMode"/> that the scan head should operate in
+        /// when <see cref="StartScanning(uint, AllDataFormat, ulong)"/> is called.
         /// </summary>
-        internal CommStatsEventArgs CommStats { get; private set; }
-            = new CommStatsEventArgs();
-
-        /// <summary>
-        /// Enable / disable network communication statistics.
-        /// </summary>
-        internal bool CommStatsEnabled => scanSystem.CommStatsEnabled;
+        internal ScanningMode Mode
+        {
+            get => mode;
+            set
+            {
+                mode = value;
+                senderReceiver.Mode = value;
+            }
+        }
 
         /// <summary>
         /// Gets the thread safe collection of profiles received from the scan head.
         /// </summary>
         internal BlockingCollection<IProfile> Profiles { get; }
             = new BlockingCollection<IProfile>(new ConcurrentQueue<IProfile>(), Globals.ProfileQueueSize);
+
+        /// <summary>
+        /// Gets the <see cref="FrameQueueManager"/> to read/write profile frames.
+        /// </summary>
+        internal FrameQueueManager QueueManager { get; } = new FrameQueueManager();
 
         /// <summary>
         /// Gets the spatial transformation parameters of the scan head required to
@@ -263,8 +268,6 @@ namespace JoeScan.Pinchot
         internal long IncompleteProfilesReceivedCount => senderReceiver.IncompleteProfilesReceivedCount;
 
         internal long BadPacketsCount => senderReceiver.BadPacketsCount;
-
-        internal IPEndPoint ClientIpEndPoint => senderReceiver.LocalReceiveIpEndPoint;
 
         internal Client::ScanHeadSpecificationT Specification { get; private set; }
 
@@ -321,6 +324,8 @@ namespace JoeScan.Pinchot
                 ExclusionMasks[pair] = new ExclusionMask(this);
                 BrightnessCorrections[pair] = new BrightnessCorrection(this);
             }
+
+            dirtyState = DirtyStateFlags.AllDirty;
         }
 
         /// <summary>
@@ -369,7 +374,7 @@ namespace JoeScan.Pinchot
         /// </summary>
         /// <remarks>
         /// The <see cref="ScanHeadConfiguration"/> parameters are only sent to the scan head when
-        /// <see cref="ScanSystem.StartScanning(uint, DataFormat)"/> is called.<br/>
+        /// <see cref="ScanSystem.StartScanning(uint, DataFormat, ScanningMode)"/> is called.<br/>
         /// A clone of <paramref name="configuration"/> is created internally. This means that changing the
         /// <see cref="ScanHeadConfiguration"/> object passed in after this function is called will not change
         /// the internal configuration.
@@ -440,6 +445,8 @@ namespace JoeScan.Pinchot
                 throw new ArgumentOutOfRangeException(nameof(configuration.MaxCameraExposureTimeUs),
                     "Invalid maximum exposure time.");
             }
+
+            FlagDirty(DirtyStateFlags.Configuration);
 
             // we make a copy so that we don't share a single configuration between all heads
             Configuration = configuration.Clone() as ScanHeadConfiguration;
@@ -526,53 +533,78 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Removes and returns an <see cref="IProfile"/> from the queue.
-        /// </summary>
-        /// <returns>The <see cref="IProfile"/> removed.</returns>
-        /// <remarks>This function blocks if no <see cref="IProfile"/>s are available.</remarks>
-        public IProfile TakeNextProfile()
-        {
-            return Profiles.Take();
-        }
-
-        /// <summary>
-        /// Removes and returns an <see cref="IProfile"/> while observing a <see cref="CancellationToken"/>.
+        /// Takes an <see cref="IProfile"/> from the queue, blocking if the queue is empty.
         /// </summary>
         /// <param name="token">The <see cref="CancellationToken"/> to observe.</param>
-        /// <returns>The <see cref="IProfile"/> removed.</returns>
-        /// <remarks>This function blocks if no <see cref="IProfile"/>s are available.</remarks>
-        public IProfile TakeNextProfile(CancellationToken token)
+        /// <returns>The dequeued <see cref="IProfile"/>.</returns>
+        public IProfile TakeNextProfile(CancellationToken token = default)
         {
             return Profiles.Take(token);
         }
 
         /// <summary>
-        /// Tries to remove a <see cref="IProfile"/> from the queue.
+        /// Tries to take an <see cref="IProfile"/> from the queue.
         /// </summary>
-        /// <param name="profile">The <see cref="IProfile"/> to be removed.</param>
+        /// <param name="profile">The dequeued <see cref="IProfile"/>.</param>
+        /// <param name="timeout">The time to wait for a profile when the queue is empty.</param>
+        /// <param name="token"><see cref="CancellationToken"/> to observe.</param>
         /// <returns>Whether a <see cref="IProfile"/> was successfully taken.</returns>
-        /// <remarks>
-        /// This function is non-blocking and will return immediately
-        /// if no <see cref="IProfile"/>s are present.
-        /// </remarks>
-        public bool TryTakeNextProfile(out IProfile profile)
+        public bool TryTakeNextProfile(out IProfile profile, TimeSpan timeout = default, CancellationToken token = default)
         {
-            return Profiles.TryTake(out profile);
+            return Profiles.TryTake(out profile, (int)timeout.TotalMilliseconds, token);
         }
 
         /// <summary>
-        /// Tries to remove and return an <see cref="IProfile"/> from the queue while
-        /// observing a <see cref="CancellationToken"/>. Will wait for up to <paramref name="timeout"/>
-        /// for an <see cref="IProfile"/> to come in if none are present.
+        /// Takes a number of <see cref="IProfile"/>s from the queue. The <see cref="IEnumerable{T}"/>
+        /// returned contains the lesser of <paramref name="maxCount"/> and
+        /// <see cref="NumberOfProfilesAvailable"/> profiles.
         /// </summary>
-        /// <param name="profile">The <see cref="IProfile"/> to be removed.</param>
-        /// <param name="timeout">A <see cref="TimeSpan"/> that represents the time to wait,
-        /// or a <see cref="TimeSpan"/> that represents -1 milliseconds to wait indefinitely.</param>
+        /// <param name="maxCount">The maximum number of profiles to read.</param>
+        /// <param name="timeout">The time to wait for a profile when the queue is empty.
+        /// Use a <see cref="TimeSpan"/> that represents -1 milliseconds to wait indefinitely.</param>
         /// <param name="token"><see cref="CancellationToken"/> to observe.</param>
-        /// <returns>Whether a <see cref="IProfile"/> was successfully taken.</returns>
-        public bool TryTakeNextProfile(out IProfile profile, TimeSpan timeout, CancellationToken token)
+        /// <returns>An <see cref="IEnumerable{T}"/> of profiles.</returns>
+        public IEnumerable<IProfile> TryTakeProfiles(int maxCount, TimeSpan timeout = default, CancellationToken token = default)
         {
-            return Profiles.TryTake(out profile, (int)timeout.TotalMilliseconds, token);
+            for (int i = 0; i < maxCount; ++i)
+            {
+                if (TryTakeNextProfile(out var profile, timeout, token))
+                {
+                    yield return profile;
+                }
+                else
+                {
+                    yield break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Takes a number of <see cref="IProfile"/>s from the queue and places
+        /// them directly in <paramref name="profiles"/>. The number dequeued
+        /// will be the lesser of <see cref="Span{T}.Length"/> of <paramref name="profiles"/>
+        /// and <see cref="NumberOfProfilesAvailable"/>.
+        /// </summary>
+        /// <param name="profiles">The preallocated destination buffer.</param>
+        /// <param name="timeout">The time to wait for a profile when the queue is empty.
+        /// Use a <see cref="TimeSpan"/> that represents -1 milliseconds to wait indefinitely.</param>
+        /// <param name="token"><see cref="CancellationToken"/> to observe.</param>
+        /// <returns>The number of profiles dequeued and placed in <paramref name="profiles"/>.</returns>
+        public int TryTakeProfiles(Span<IProfile> profiles, TimeSpan timeout = default, CancellationToken token = default)
+        {
+            for (int i = 0; i < profiles.Length; ++i)
+            {
+                if (TryTakeNextProfile(out var profile, timeout, token))
+                {
+                    profiles[i] = profile;
+                }
+                else
+                {
+                    return i;
+                }
+            }
+
+            return profiles.Length;
         }
 
         /// <summary>
@@ -602,9 +634,12 @@ namespace JoeScan.Pinchot
                 Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
             }
 
+            FlagDirty(DirtyStateFlags.Window);
+
             if (IsConnected)
             {
                 SendAllWindows();
+                StoreAllAlignments();
             }
         }
 
@@ -640,11 +675,15 @@ namespace JoeScan.Pinchot
             var pair = GetPair(camera);
             Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
 
+            FlagDirty(DirtyStateFlags.Window);
+
             if (IsConnected)
             {
                 SendWindow(pair);
+                StoreAlignment(pair);
             }
         }
+
         /// <summary>
         /// Sets the spatial transform parameters of the scan head in order to properly
         /// transform the data from a scan head based coordinate system to one based on
@@ -679,9 +718,12 @@ namespace JoeScan.Pinchot
             var pair = GetPair(laser);
             Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
 
+            FlagDirty(DirtyStateFlags.Window);
+
             if (IsConnected)
             {
                 SendWindow(pair);
+                StoreAlignment(pair);
             }
         }
 
@@ -699,7 +741,11 @@ namespace JoeScan.Pinchot
         public void SetWindow(ScanWindow window)
         {
             // TODO: If netstandard2.0 is dropped, the `ToList` can be removed
+#if NETSTANDARD2_1_OR_GREATER || NET5_0_OR_GREATER
+            foreach (var pair in Windows.Keys)
+#else
             foreach (var pair in Windows.Keys.ToList())
+#endif
             {
                 SetWindow(pair, window);
             }
@@ -757,7 +803,6 @@ namespace JoeScan.Pinchot
         public ExclusionMask CreateExclusionMask()
         {
             ThrowIfNotVersionCompatible(16, 1, 0);
-
             return new ExclusionMask(this);
         }
 
@@ -797,6 +842,8 @@ namespace JoeScan.Pinchot
 
             var pair = GetPair(camera);
             ExclusionMasks[pair] = mask.Clone() as ExclusionMask;
+
+            FlagDirty(DirtyStateFlags.ExclusionMask);
 
             if (IsConnected)
             {
@@ -840,6 +887,8 @@ namespace JoeScan.Pinchot
 
             var pair = GetPair(laser);
             ExclusionMasks[pair] = mask.Clone() as ExclusionMask;
+
+            FlagDirty(DirtyStateFlags.ExclusionMask);
 
             if (IsConnected)
             {
@@ -965,6 +1014,7 @@ namespace JoeScan.Pinchot
         /// Exposes the camera for <see cref="ScanHeadConfiguration.DefaultCameraExposureTimeUs"/>.
         /// </summary>
         /// <param name="camera">The <see cref="Camera"/> from which to capture the image.</param>
+        /// <param name="imageDataType">The <see cref="DiagnosticImageType" /> determines whether the returned image should contain raw pixel data or pixels merged with the mask.</param>
         /// <returns>The <see cref="CameraImage"/>.</returns>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
@@ -974,9 +1024,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="ArgumentException">
         /// <paramref name="camera"/> isn't valid.
         /// </exception>
-        public CameraImage GetDiagnosticCameraImage(Camera camera)
+        public CameraImage GetDiagnosticCameraImage(Camera camera, DiagnosticImageType imageDataType = DiagnosticImageType.Masked)
         {
-            return GetDiagnosticCameraImage(camera, Configuration.DefaultCameraExposureTimeUs);
+            return GetDiagnosticCameraImage(camera, Configuration.DefaultCameraExposureTimeUs, imageDataType);
         }
 
         /// <summary>
@@ -984,6 +1034,7 @@ namespace JoeScan.Pinchot
         /// </summary>
         /// <param name="camera">The <see cref="Camera"/> from which to capture the image.</param>
         /// <param name="cameraExposureUs">How long the camera should expose for in microseconds.</param>
+        /// <param name="imageDataType">The <see cref="DiagnosticImageType" /> determines whether the returned image should contain raw pixel data or pixels merged with the mask.</param>
         /// <returns>The <see cref="CameraImage"/>.</returns>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
@@ -996,7 +1047,7 @@ namespace JoeScan.Pinchot
         /// <exception cref="ArgumentOutOfRangeException">
         /// <paramref name="cameraExposureUs"/> is too long or too short.
         /// </exception>
-        public CameraImage GetDiagnosticCameraImage(Camera camera, uint cameraExposureUs)
+        public CameraImage GetDiagnosticCameraImage(Camera camera, uint cameraExposureUs, DiagnosticImageType imageDataType = DiagnosticImageType.Masked)
         {
             if (!IsValidCamera(camera))
             {
@@ -1005,16 +1056,17 @@ namespace JoeScan.Pinchot
 
             // Since laser is off, just find any valid laser to use as a dummy value
             var laser = CameraLaserPairs.First(clp => clp.Camera == camera).Laser;
-            return GetDiagnosticCameraImage(camera, cameraExposureUs, laser, 0);
+            return GetDiagnosticCameraImage(camera, cameraExposureUs, laser, 0, imageDataType);
         }
 
         /// <summary>
         /// Captures an image from the specified <see cref="Camera"/> while a <see cref="Laser"/> is on.
-        /// Exposes the camera for <see cref="ScanHeadConfiguration.DefaultCameraExposureTimeUs"/> and
+        /// Exposes the camera for <see cref="ScanHeadConfiguration.DefaultLaserOnTimeUs"/> and
         /// turns the laser on for <see cref="ScanHeadConfiguration.DefaultLaserOnTimeUs"/>.
         /// </summary>
         /// <param name="camera">The <see cref="Camera"/> from which to capture the image.</param>
         /// <param name="laser">The <see cref="Laser"/> that should be on during the image capture.</param>
+        /// <param name="imageDataType">The <see cref="DiagnosticImageType" /> determines whether the returned image should contain raw pixel data or pixels merged with the mask.</param>
         /// <returns>The <see cref="CameraImage"/>.</returns>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
@@ -1026,18 +1078,19 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// <paramref name="laser"/> isn't valid.
         /// </exception>
-        public CameraImage GetDiagnosticCameraImage(Camera camera, Laser laser)
+        public CameraImage GetDiagnosticCameraImage(Camera camera, Laser laser, DiagnosticImageType imageDataType = DiagnosticImageType.Masked)
         {
-            return GetDiagnosticCameraImage(camera, Configuration.DefaultCameraExposureTimeUs, laser, Configuration.DefaultLaserOnTimeUs);
+            return GetDiagnosticCameraImage(camera, Configuration.DefaultLaserOnTimeUs, laser, Configuration.DefaultLaserOnTimeUs, imageDataType);
         }
 
         /// <summary>
         /// Captures an image from the specified <see cref="Camera"/> while a <see cref="Laser"/> is on.
-        /// Exposes the camera for <see cref="ScanHeadConfiguration.DefaultCameraExposureTimeUs"/>.
+        /// Exposes the camera for the same amount of time as the laserOnTimeUs parameter.
         /// </summary>
         /// <param name="camera">The <see cref="Camera"/> from which to capture the image.</param>
         /// <param name="laser">The <see cref="Laser"/> that should be on during the image capture.</param>
         /// <param name="laserOnTimeUs">How long the laser should be on for during the image capture in microseconds.</param>
+        /// <param name="imageDataType">The <see cref="DiagnosticImageType" /> determines whether the returned image should contain raw pixel data or pixels merged with the mask.</param>
         /// <returns>The <see cref="CameraImage"/>.</returns>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
@@ -1052,9 +1105,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="ArgumentOutOfRangeException">
         /// <paramref name="laserOnTimeUs"/> is too long or too short.
         /// </exception>
-        public CameraImage GetDiagnosticCameraImage(Camera camera, Laser laser, uint laserOnTimeUs)
+        public CameraImage GetDiagnosticCameraImage(Camera camera, Laser laser, uint laserOnTimeUs, DiagnosticImageType imageDataType = DiagnosticImageType.Masked)
         {
-            return GetDiagnosticCameraImage(camera, Configuration.DefaultCameraExposureTimeUs, laser, laserOnTimeUs);
+            return GetDiagnosticCameraImage(camera, laserOnTimeUs, laser, laserOnTimeUs, imageDataType);
         }
 
         /// <summary>
@@ -1064,6 +1117,7 @@ namespace JoeScan.Pinchot
         /// <param name="cameraExposureUs">How long the camera should expose for in microseconds.</param>
         /// <param name="laser">The <see cref="Laser"/> that should be on during the image capture.</param>
         /// <param name="laserOnTimeUs">How long the laser should be on for during the image capture in microseconds.</param>
+        /// <param name="imageDataType">The <see cref="DiagnosticImageType" /> determines whether the returned image should contain raw pixel data or pixels merged with the mask.</param>
         /// <returns>The <see cref="CameraImage"/>.</returns>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
@@ -1081,7 +1135,7 @@ namespace JoeScan.Pinchot
         /// <paramref name="laserOnTimeUs"/> is too long or too short.
         /// </exception>
         public CameraImage GetDiagnosticCameraImage(Camera camera, uint cameraExposureUs, Laser laser, uint laserOnTimeUs,
-            Client::ImageDataType imageDataType = Client.ImageDataType.MERGED_MASK_IMAGE)
+            DiagnosticImageType imageDataType = DiagnosticImageType.Masked)
         {
             if (!IsConnected)
             {
@@ -1129,7 +1183,7 @@ namespace JoeScan.Pinchot
                 LaserOnTimeNs = laserOnTimeUs * 1000,
                 LaserDetectionThreshold = Configuration.LaserDetectionThreshold,
                 SaturationThreshold = Configuration.SaturationThreshold,
-                ImageDataType = imageDataType,
+                ImageDataType = (Client::ImageDataType)imageDataType
             };
 
             var img = senderReceiver.RequestDiagnosticImage(req);
@@ -1140,8 +1194,7 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Empties the internal client side software buffers used to store profiles received from a given
-        /// scan head.
+        /// Empties the internal client side software buffers used to store profiles received from a given scan head.
         /// <para>
         /// Under normal scanning conditions where the application consumes profiles as they become available,
         /// this function will not be needed. Its use is to be found in cases where the application fails to
@@ -1149,7 +1202,13 @@ namespace JoeScan.Pinchot
         /// <see cref="NumberOfProfilesAvailable"/> property, becomes more than the application can consume
         /// and only the most recent scan data is desired.
         /// </para>
+        /// <para>
+        /// When operating in frame scanning mode, use <see cref="ScanSystem.ClearFrames"/> instead.
+        /// </para>
         /// </summary>
+        /// <remarks>
+        /// Profiles are automatically cleared when <see cref="ScanSystem.StartScanning(uint, DataFormat, ScanningMode)"/> is called.
+        /// </remarks>
         public void ClearProfiles()
         {
             while (Profiles.TryTake(out _)) { }
@@ -1289,13 +1348,8 @@ namespace JoeScan.Pinchot
 
         internal void Connect(Client::ConnectionType connType, TimeSpan timeout)
         {
-            if (!Enabled)
-            {
-                return;
-            }
-
             senderReceiver?.Dispose();
-            senderReceiver = new ScanHeadSenderReceiver(this, CommStatsEnabled);
+            senderReceiver = new ScanHeadSenderReceiver(this);
 
             IsConnected = senderReceiver.Connect(connType, timeout);
             if (!IsConnected)
@@ -1303,14 +1357,14 @@ namespace JoeScan.Pinchot
                 return;
             }
 
-            senderReceiver.StatsEvent += RaiseCommStatsUpdateEvent;
+            _ = RequestStatus();
         }
 
-        internal void StartScanning(uint periodUs, AllDataFormat dataFormat)
+        internal void StartScanning(uint periodUs, AllDataFormat dataFormat, ulong startTimeNs)
         {
-            if (!Enabled)
+            if (IsDirty())
             {
-                return;
+                throw new InvalidOperationException("Scan head configuration was not sent prior to StartScanning");
             }
 
             if (periodUs < Specification.MinScanPeriodUs)
@@ -1334,17 +1388,21 @@ namespace JoeScan.Pinchot
                     $"current scan head configuration {CachedStatus.MinScanPeriodUs}µs for scan head {ID}.");
             }
 
-            ClearProfiles();
-            senderReceiver.StartScanning(periodUs, dataFormat);
+            // TODO: Combine frame/profile queue logic
+            if (Mode == ScanningMode.Frame)
+            {
+                QueueManager.Init(CameraLaserPairs);
+            }
+            else
+            {
+                ClearProfiles();
+            }
+
+            senderReceiver.StartScanning(periodUs, dataFormat, startTimeNs);
         }
 
         internal void StopScanning()
         {
-            if (!Enabled)
-            {
-                return;
-            }
-
             senderReceiver.StopScanning();
         }
 
@@ -1365,27 +1423,25 @@ namespace JoeScan.Pinchot
 
             Windows[pair] = window.Clone() as ScanWindow;
 
+            FlagDirty(DirtyStateFlags.Window);
+
             if (IsConnected)
             {
                 SendWindow(pair);
             }
         }
 
-
         /// <summary>
         /// Sends the window of each <see cref="CameraLaserPair"/>
         /// </summary>
         internal void SendAllWindows()
         {
-            if (!Enabled)
-            {
-                return;
-            }
-
             foreach (var pair in CameraLaserPairs)
             {
-                senderReceiver.SendWindow(pair);
+                SendWindow(pair);
             }
+
+            UnflagDirty(DirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -1393,12 +1449,40 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal void SendWindow(CameraLaserPair pair)
         {
-            if (!Enabled)
+            senderReceiver.SendWindow(pair);
+            UnflagDirty(DirtyStateFlags.Window);
+        }
+
+        /// <summary>
+        /// Sends all alignments to the scan head to be stored for diagnostic purposes
+        /// </summary>
+        internal void StoreAllAlignments()
+        {
+            foreach (var pair in CameraLaserPairs)
+            {
+                StoreAlignment(pair);
+            }
+        }
+
+        /// <summary>
+        /// Send the alignment associated with <paramref name="pair"/> to the
+        /// scan head to be stored for diagnostic purposes
+        /// </summary>
+        internal void StoreAlignment(CameraLaserPair pair)
+        {
+            if (!IsVersionCompatible(16, 1, 11))
             {
                 return;
             }
 
-            senderReceiver.SendWindow(pair);
+            // only send alignment if it has been set
+            if (Alignments.TryGetValue(pair, out var alignment)
+                && alignment.ShiftY != 0
+                && alignment.ShiftX != 0
+                && alignment.Roll != 0)
+            {
+                senderReceiver.SendAlignmentStoreData(pair);
+            }
         }
 
         /// <summary>
@@ -1417,12 +1501,8 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal void SendExclusionMask(CameraLaserPair pair)
         {
-            if (!Enabled)
-            {
-                return;
-            }
-
             senderReceiver.SendExclusionMask(pair);
+            UnflagDirty(DirtyStateFlags.ExclusionMask);
         }
 
         internal void SendAllBrightnessCorrections()
@@ -1435,22 +1515,21 @@ namespace JoeScan.Pinchot
 
         internal void SendBrightnessCorrection(CameraLaserPair pair)
         {
-            if (!Enabled)
-            {
-                return;
-            }
-
             senderReceiver.SendBrightnessCorrection(pair);
+            UnflagDirty(DirtyStateFlags.BrightnessCorrection);
+        }
+
+        internal void SendMappleCorrection(CameraLaserPair pair, double x, double y, double roll, List<string> notes = null)
+        {
+            ThrowIfNotVersionCompatible(16, 1, 11);
+
+            senderReceiver.SendCorrectionStoreData(pair, x, y, roll, notes);
         }
 
         internal void Disconnect()
         {
-            if (!Enabled)
-            {
-                return;
-            }
-
             IsConnected = false;
+            dirtyState = DirtyStateFlags.AllDirty;
             senderReceiver.Disconnect();
         }
 
@@ -1585,6 +1664,7 @@ namespace JoeScan.Pinchot
             {
                 throw new ArgumentException($"{camera} does not exist for scan head {ID}.", nameof(camera));
             }
+
             return (uint)port;
         }
 
@@ -1598,6 +1678,7 @@ namespace JoeScan.Pinchot
             {
                 throw new ArgumentException($"{laser} does not exist for scan head {ID}.", nameof(laser));
             }
+
             return (uint)port;
         }
 
@@ -1677,44 +1758,24 @@ namespace JoeScan.Pinchot
 
         internal uint MinScanPeriod()
         {
-            return CachedStatus.MinScanPeriodUs < Specification.MinScanPeriodUs
-                ? Specification.MinScanPeriodUs
-                : CachedStatus.MinScanPeriodUs;
+            return Math.Max(CachedStatus.MinScanPeriodUs, Specification.MinScanPeriodUs);
         }
 
+        internal bool IsDirty()
+        {
+            return dirtyState != DirtyStateFlags.Clean;
+        }
+
+        internal bool IsDirty(DirtyStateFlags flag)
+        {
+            return dirtyState.HasFlag(flag);
+        }
         #endregion
 
         #region Private Methods
 
-        private void RaiseCommStatsUpdateEvent(object sender, CommStatsEventArgs args)
-        {
-            CommStats = args;
-            StatsEvent?.Invoke(this, new CommStatsEventArgs()
-            {
-                ID = CommStats.ID,
-                CompleteProfilesReceived = CommStats.CompleteProfilesReceived,
-                ProfileRate = CommStats.ProfileRate,
-                BytesReceived = CommStats.BytesReceived,
-                Evicted = CommStats.Evicted,
-                DataRate = CommStats.DataRate,
-                BadPackets = CommStats.BadPackets,
-                GoodPackets = CommStats.GoodPackets
-            });
-        }
-
         internal static Client::ScanHeadSpecificationT GetSpecification(ProductType type)
         {
-#if NETSTANDARD2_1_OR_GREATER || NET5_0_OR_GREATER
-            string binName = type switch
-            {
-                ProductType.JS50WSC => "js50wsc.bin",
-                ProductType.JS50WX => "js50wx.bin",
-                ProductType.JS50X6B20 => "js50x6b20.bin",
-                ProductType.JS50X6B30 => "js50x6b30.bin",
-                ProductType.JS50MX => "js50mx.bin",
-                _ => throw new ArgumentException($"Invalid product type: {type}.", nameof(type))
-            };
-#else
             string binName;
             switch (type)
             {
@@ -1733,12 +1794,37 @@ namespace JoeScan.Pinchot
                 case ProductType.JS50MX:
                     binName = "js50mx.bin";
                     break;
+                case ProductType.JS50Z820:
+                    binName = "js50z820.bin";
+                    break;
+                case ProductType.JS50Z830:
+                    binName = "js50z830.bin";
+                    break;
                 default:
                     throw new ArgumentException($"Invalid product type: {type}.", nameof(type));
             }
-#endif
 
             return Schema.ProductSpecification.GetSpecification(binName);
+        }
+
+        private void FlagDirty(DirtyStateFlags dirtyFlag)
+        {
+            if (dirtyFlag.Equals(DirtyStateFlags.Clean))
+            {
+                return;
+            }
+
+            dirtyState |= dirtyFlag;
+        }
+
+        private void UnflagDirty(DirtyStateFlags flagToRemove)
+        {
+            dirtyState &= ~flagToRemove;
+        }
+
+        internal void ClearDirty()
+        {
+            dirtyState = DirtyStateFlags.Clean;
         }
 
         #endregion

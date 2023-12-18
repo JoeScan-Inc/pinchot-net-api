@@ -5,7 +5,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -22,14 +21,6 @@ namespace JoeScan.Pinchot
         #region Private Fields
 
         private readonly ScanHead scanHead;
-
-        private long bytesReceived;
-        private long goodPackets;
-        private long evictedForTimeout;
-
-        private readonly byte[] udpReceiveBuffer = new byte[2048];
-        private readonly UdpClient udpReceiveClient;
-        private readonly Thread udpReceiveThread;
 
         private readonly TcpClient tcpControlClient;
         private NetworkStream TcpControlStream => tcpControlClient.GetStream();
@@ -48,15 +39,8 @@ namespace JoeScan.Pinchot
         private long lastEncoderCount;
         private uint currentSkipCount;
 
-        private readonly CommStatsEventArgs commStats = new CommStatsEventArgs();
-        private readonly Thread commStatsThread;
-
-        // used to timestamp data packets internally
-        private readonly Stopwatch timeBase = Stopwatch.StartNew();
-
         private bool disposed;
 
-        private readonly byte[] StartScanningRequest = new Client::MessageClientT() { Type = Client::MessageType.SCAN_START }.SerializeToBinary();
         private readonly byte[] StopScanningRequest = new Client::MessageClientT() { Type = Client::MessageType.SCAN_STOP }.SerializeToBinary();
         private readonly byte[] DisconnectRequest = new Client::MessageClientT() { Type = Client::MessageType.DISCONNECT }.SerializeToBinary();
         private readonly byte[] KeepAliveRequest = new Client::MessageClientT() { Type = Client::MessageType.KEEP_ALIVE }.SerializeToBinary();
@@ -64,15 +48,7 @@ namespace JoeScan.Pinchot
 
         #endregion
 
-        #region Events
-
-        internal event EventHandler<CommStatsEventArgs> StatsEvent;
-
-        #endregion
-
         #region Internal Properties
-
-        internal IPEndPoint LocalReceiveIpEndPoint => (IPEndPoint)udpReceiveClient.Client.LocalEndPoint;
 
         internal bool ProfileBufferOverflowed { get; private set; }
 
@@ -84,19 +60,16 @@ namespace JoeScan.Pinchot
 
         internal Exception TcpException { get; private set; }
 
+        internal ScanningMode Mode { get; set; }
+
         #endregion
 
         #region Lifecycle
 
-        internal ScanHeadSenderReceiver(ScanHead scanHead, bool enableCommStats)
+        internal ScanHeadSenderReceiver(ScanHead scanHead)
         {
             this.scanHead = scanHead;
             token = tokenSource.Token;
-
-            udpReceiveClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0))
-            {
-                Client = { ReceiveBufferSize = Globals.ReceiveDataBufferSize }
-            };
 
             tcpControlClient = new TcpClient(new IPEndPoint(scanHead.ClientIpAddress, 0))
             {
@@ -110,21 +83,6 @@ namespace JoeScan.Pinchot
             {
                 ReceiveBufferSize = Globals.ReceiveDataBufferSize
             };
-
-            udpReceiveThread = new Thread(UdpReceiveLoop) { Priority = ThreadPriority.Highest, IsBackground = true };
-            udpReceiveThread.Start();
-
-            if (enableCommStats)
-            {
-                commStatsThread = new Thread(CommStatsLoop) { Priority = ThreadPriority.Lowest, IsBackground = true };
-                commStatsThread.Start();
-            }
-        }
-
-        /// <nodoc/>
-        ~ScanHeadSenderReceiver()
-        {
-            Dispose(false);
         }
 
         // Public implementation of Dispose pattern callable by consumers.
@@ -145,12 +103,9 @@ namespace JoeScan.Pinchot
             if (disposing)
             {
                 tokenSource.Cancel();
-                udpReceiveClient.Close();
                 tcpControlClient.Close();
                 tcpDataClient.Close();
-                udpReceiveThread?.Join();
                 tcpDataReceiveThread?.Join();
-                commStatsThread?.Join();
                 tokenSource.Dispose();
             }
 
@@ -163,10 +118,7 @@ namespace JoeScan.Pinchot
 
         internal bool Connect(Client::ConnectionType connType, TimeSpan timeout)
         {
-            bytesReceived = 0L;
-            goodPackets = 0L;
             BadPacketsCount = 0L;
-            evictedForTimeout = 0L;
             IncompleteProfilesReceivedCount = 0L;
 
             byte[] message = new Client::MessageClientT()
@@ -179,7 +131,8 @@ namespace JoeScan.Pinchot
                     {
                         ConnectionType = connType,
                         ScanHeadId = scanHead.ID,
-                        ScanHeadSerial = scanHead.SerialNumber
+                        ScanHeadSerial = scanHead.SerialNumber,
+                        Notes = new List<string>() { $".NET API {VersionInformation.Version}" }
                     }
                 }
             }.SerializeToBinary();
@@ -224,7 +177,19 @@ namespace JoeScan.Pinchot
             TcpSend(correctionReq, TcpControlStream);
         }
 
-        internal void StartScanning(uint periodUs, AllDataFormat dataFormat)
+        internal void SendAlignmentStoreData(CameraLaserPair pair)
+        {
+            byte[] alignmentReq = CreateAlignmentStoreRequest(pair);
+            TcpSend(alignmentReq, TcpControlStream);
+        }
+
+        internal void SendCorrectionStoreData(CameraLaserPair pair, double x, double y, double roll, List<string> notes = null)
+        {
+            byte[] correctionReq = CreateCorrectionStoreRequest(pair, x, y, roll, notes);
+            TcpSend(correctionReq, TcpControlStream);
+        }
+
+        internal void StartScanning(uint periodUs, AllDataFormat dataFormat, ulong startTimeNs)
         {
             ProfileBufferOverflowed = false;
 
@@ -233,7 +198,8 @@ namespace JoeScan.Pinchot
 
             byte[] confReq = CreateScanConfigurationRequest(periodUs, dataFormat);
             TcpSend(confReq, TcpControlStream);
-            TcpSend(StartScanningRequest, TcpControlStream);
+            byte[] startReq = CreateStartScanningRequest(startTimeNs);
+            TcpSend(startReq, TcpControlStream);
         }
 
         internal void StopScanning()
@@ -527,18 +493,29 @@ namespace JoeScan.Pinchot
                 }
             }
 
-            var profiles = scanHead.Profiles;
-            if (!profiles.TryAdd(profile))
+            // TODO: unify profile and frame queueing
+            if (Mode == ScanningMode.Profile)
             {
-                ProfileBufferOverflowed = true;
-                profiles.TryTake(out _);
-                profiles.TryAdd(profile);
+                var profiles = scanHead.Profiles;
+                if (!profiles.TryAdd(profile))
+                {
+                    ProfileBufferOverflowed = true;
+                    profiles.TryTake(out _);
+                    profiles.TryAdd(profile);
+                }
+            }
+            else if (Mode == ScanningMode.Frame)
+            {
+                scanHead.QueueManager.EnqueueProfile(profile);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unhandled queueing strategy for {Mode}");
             }
         }
 
         private async void TcpDataReceiveLoop()
         {
-            bytesReceived = 0;
             int lastID = 0;
             ulong lastTimestamp = 0;
             Profile profile = null;
@@ -629,7 +606,6 @@ namespace JoeScan.Pinchot
                     }
 
                     bool isComplete = profileAssembler.ProcessPacket(profile, dataHeader, packet);
-                    goodPackets++;
 
                     if (isComplete)
                     {
@@ -648,83 +624,6 @@ namespace JoeScan.Pinchot
                 // We can either try to reconnect or disconnect
                 // and let the user know something happened.
                 TcpException = e;
-            }
-        }
-
-        private void UdpReceiveLoop()
-        {
-            EndPoint ep = new IPEndPoint(IPAddress.Any, 0);
-            bytesReceived = 0;
-            int lastID = 0;
-            ulong lastTimestamp = 0;
-            Profile profile = null;
-
-            while (true)
-            {
-                try
-                {
-                    token.ThrowIfCancellationRequested();
-
-                    bytesReceived += udpReceiveClient.Client.ReceiveFrom(udpReceiveBuffer, ref ep);
-                    var packet = udpReceiveBuffer.AsSpan();
-
-                    ushort magic = (ushort)((packet[0] << 8) + packet[1]);
-                    if (magic == Globals.DataMagic) // Data packet
-                    {
-                        var dataHeader = new DataPacketHeader(packet);
-
-                        if (profile == null)
-                        {
-                            profile = profileAssembler.CreateNewProfile(dataHeader);
-                        }
-                        else if (dataHeader.Source != lastID || dataHeader.TimestampNs != lastTimestamp)
-                        {
-                            ++IncompleteProfilesReceivedCount;
-                            QueueProfile(profile);
-                            profile = profileAssembler.CreateNewProfile(dataHeader);
-                        }
-
-                        bool isComplete = profileAssembler.ProcessPacket(profile, dataHeader, packet);
-                        goodPackets++;
-
-                        if (isComplete)
-                        {
-                            ++CompleteProfilesReceivedCount;
-                            QueueProfile(profile);
-                            profile = null;
-                        }
-
-                        lastID = dataHeader.Source;
-                        lastTimestamp = dataHeader.TimestampNs;
-                    }
-                    else
-                    {
-                        // Unknown command
-                        BadPacketsCount++;
-                    }
-                }
-                catch (ObjectDisposedException)
-                {
-                    // Time to break out of receive loop
-                    break;
-                }
-                catch (SocketException)
-                {
-                    // We get here if we call Close() on the UdpClient
-                    // while it is in the Receive(0 call. Apparently
-                    // the only way to abort a Receive call is to
-                    // close the underlying Socket.
-                    break;
-                }
-                catch (OperationCanceledException)
-                {
-                    // Time to break out of receive loop
-                    break;
-                }
-                catch (Exception)
-                {
-                    BadPacketsCount++;
-                }
             }
         }
 
@@ -771,7 +670,6 @@ namespace JoeScan.Pinchot
         private byte[] CreateExclusionMaskRequest(CameraLaserPair pair)
         {
             var mask = scanHead.ExclusionMasks[pair];
-
             var message = new Client::MessageClientT
             {
                 Type = Client::MessageType.EXCLUSION_MASK,
@@ -793,7 +691,6 @@ namespace JoeScan.Pinchot
         private byte[] CreateBrightnessCorrectionRequest(CameraLaserPair pair)
         {
             var correction = scanHead.BrightnessCorrections[pair];
-
             var message = new Client::MessageClientT
             {
                 Type = Client::MessageType.BRIGHTNESS_CORRECTION,
@@ -830,8 +727,7 @@ namespace JoeScan.Pinchot
                         LaserDetectionThreshold = conf.LaserDetectionThreshold,
                         SaturationPercent = conf.SaturationPercentage,
                         SaturationThreshold = conf.SaturationThreshold,
-                        ScanPeriodNs = periodUs * 1000,
-                        UdpPort = (ushort)LocalReceiveIpEndPoint.Port,
+                        ScanPeriodNs = periodUs * 1000
                     }
                 }
             };
@@ -839,52 +735,100 @@ namespace JoeScan.Pinchot
             return message.SerializeToBinary();
         }
 
-        private void CommStatsLoop()
+        private byte[] CreateStartScanningRequest(ulong startTimeNs)
         {
-            long lastCheck = timeBase.ElapsedMilliseconds;
-            long bytesReceivedSinceLastCheck = 0;
-            long profilesReceivedSinceLastCheck = 0;
-            while (true)
+            var message = new Client::MessageClientT()
             {
-                try
+                Type = Client::MessageType.SCAN_START,
+                Data = new Client::MessageDataUnion()
                 {
-                    token.WaitHandle.WaitOne(200);
-                    token.ThrowIfCancellationRequested();
-                    long now = timeBase.ElapsedMilliseconds;
-                    double dataRate = (bytesReceived - bytesReceivedSinceLastCheck) * 1000.0 / (now - lastCheck);
-                    long profileRate = (CompleteProfilesReceivedCount - profilesReceivedSinceLastCheck) * 1000 /
-                                      (now - lastCheck);
-
-                    commStats.ID = scanHead.ID;
-                    commStats.CompleteProfilesReceived = CompleteProfilesReceivedCount;
-                    commStats.ProfileRate = profileRate;
-                    commStats.BytesReceived = bytesReceived;
-                    commStats.Evicted = evictedForTimeout + IncompleteProfilesReceivedCount;
-                    commStats.DataRate = dataRate;
-                    commStats.BadPackets = BadPacketsCount;
-                    commStats.GoodPackets = goodPackets;
-
-                    StatsEvent?.Invoke(this, new CommStatsEventArgs()
+                    Type = Client::MessageData.ScanStartData,
+                    Value = new Client::ScanStartDataT()
                     {
-                        ID = commStats.ID,
-                        CompleteProfilesReceived = commStats.CompleteProfilesReceived,
-                        ProfileRate = commStats.ProfileRate,
-                        BytesReceived = commStats.BytesReceived,
-                        Evicted = commStats.Evicted,
-                        DataRate = commStats.DataRate,
-                        BadPackets = commStats.BadPackets,
-                        GoodPackets = commStats.GoodPackets
-                    });
+                        StartTimeNs = startTimeNs
+                    }
+                }
+            };
 
-                    lastCheck = now;
-                    bytesReceivedSinceLastCheck = bytesReceived;
-                    profilesReceivedSinceLastCheck = CompleteProfilesReceivedCount;
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
+            return message.SerializeToBinary();
+        }
+
+        private byte[] CreateAlignmentStoreRequest(CameraLaserPair pair, List<string> additionalNotes = null)
+        {
+            var alignment = scanHead.Alignments[pair];
+
+            var notes = new List<string>() { $".NET API {VersionInformation.Version}" };
+            if (additionalNotes != null)
+            {
+                notes.AddRange(additionalNotes);
             }
+
+            var message = new Client::MessageClientT
+            {
+                Type = Client.MessageType.STORE_INFO,
+                Data = new Client.MessageDataUnion
+                {
+                    Type = Client.MessageData.StoreInfoData,
+                    Value = new Client.StoreInfoDataT
+                    {
+                        Type = Client.StoreType.ALIGNMENT,
+                        Notes = notes,
+                        TimestampS = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                        Data = new Client.StoreDataUnion
+                        {
+                            Type = Client.StoreData.StoreAlignmentData,
+                            Value = new Client.StoreAlignmentDataT
+                            {
+                                CameraPort = scanHead.CameraIdToPort(pair.Camera),
+                                LaserPort = scanHead.LaserIdToPort(pair.Laser),
+                                YOffset = alignment.ShiftY,
+                                XOffset = alignment.ShiftX,
+                                Roll = alignment.Roll
+                            }
+                        }
+                    }
+                }
+            };
+
+            return message.SerializeToBinary();
+        }
+
+        private byte[] CreateCorrectionStoreRequest(CameraLaserPair pair, double x, double y, double roll, List<string> additionalNotes = null)
+        {
+            var notes = new List<string>() { $".NET API {VersionInformation.Version}" };
+            if (additionalNotes != null)
+            {
+                notes.AddRange(additionalNotes);
+            }
+
+            var message = new Client::MessageClientT
+            {
+                Type = Client.MessageType.STORE_INFO,
+                Data = new Client.MessageDataUnion
+                {
+                    Type = Client.MessageData.StoreInfoData,
+                    Value = new Client.StoreInfoDataT
+                    {
+                        Type = Client.StoreType.MAPPLE_CORRECTION,
+                        Notes = notes,
+                        TimestampS = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                        Data = new Client.StoreDataUnion
+                        {
+                            Type = Client.StoreData.StoreMappleCorrectionData,
+                            Value = new Client.StoreMappleCorrectionDataT
+                            {
+                                CameraPort = scanHead.CameraIdToPort(pair.Camera),
+                                LaserPort = scanHead.LaserIdToPort(pair.Laser),
+                                XOffset = x,
+                                YOffset = y,
+                                Roll = roll
+                            }
+                        }
+                    }
+                }
+            };
+
+            return message.SerializeToBinary();
         }
 
         #endregion

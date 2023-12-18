@@ -7,7 +7,6 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -33,14 +32,19 @@ namespace JoeScan.Pinchot
         #region Private Fields
 
         private readonly ConcurrentDictionary<uint, ScanHead> idToScanHead = new ConcurrentDictionary<uint, ScanHead>();
-        private Thread statsThread;
-        private readonly Stopwatch timeBase = Stopwatch.StartNew();
-        private CancellationTokenSource cancellationTokenSource;
-        private CancellationToken token;
+        private BlockingCollection<IProfile>[] profileBuffers = Array.Empty<BlockingCollection<IProfile>>();
+        private readonly ScanSyncReceiver scanSyncReceiver = new ScanSyncReceiver();
         private CancellationTokenSource keepAliveTokenSource;
         private CancellationToken keepAliveToken;
-        private readonly ConcurrentDictionary<uint, CommStatsEventArgs> previousCommStats = new ConcurrentDictionary<uint, CommStatsEventArgs>();
         private bool disposed;
+        private uint currentSequence = 1;
+        private int profilesPerFrame;
+
+        /// <summary>
+        /// The maximum number of profiles that can be queued before
+        /// a frame is forcefully taken to avoid falling behind.
+        /// </summary>
+        private const int FrameThreshold = 50;
 
         /// <summary>
         /// The amount of time cameras start exposing before the laser turns on. This needs to be accounted for
@@ -53,7 +57,15 @@ namespace JoeScan.Pinchot
 
         #region Events
 
-        internal event EventHandler<CommStatsEventArgs> StatsEvent;
+        /// <summary>
+        /// This event can be used to listen for ScanSync updates for diagnostic purposes.
+        /// It will be raised for every 1000 ScanSync updates or roughly once every second.
+        /// </summary>
+        public event EventHandler<ScanSyncUpdateEvent> ScanSyncUpdateEvent
+        {
+            add => scanSyncReceiver.ScanSyncUpdate += value;
+            remove => scanSyncReceiver.ScanSyncUpdate -= value;
+        }
 
         #endregion
 
@@ -73,7 +85,18 @@ namespace JoeScan.Pinchot
         /// <value>
         /// A value indicating whether all <see cref="ScanHeads"/> have established network connection.
         /// </value>
-        public bool IsConnected => EnabledHeads.Any() && EnabledHeads.All(s => s.IsConnected);
+        public bool IsConnected => ScanHeads.Any() && ScanHeads.All(s => s.IsConnected);
+
+        /// <summary>
+        /// Obtains the configuration state of the scan system. If `true`, the system's configuration has
+        /// already been sent to the scan head via <see cref="PreSendConfiguration"/>.
+        /// If `false`, the configuration will be sent when <see cref="StartScanning(uint, DataFormat, ScanningMode)"/> is called and there
+        /// will be a time penalty before receiving profiles.
+        /// </summary>
+        /// <value>
+        /// A <see cref="bool"/> value indicating whether the scan system is configured (`true`) or not (`false`).
+        /// </value>
+        public bool IsConfigured => ScanHeads.Any() && ScanHeads.All(s => !s.IsDirty());
 
         /// <summary>
         /// Gets a read-only collection of <see cref="ScanHead"/>s belonging to the scan system.
@@ -94,16 +117,7 @@ namespace JoeScan.Pinchot
 
         internal Client::ConnectionType ConnectionType { get; set; }
 
-        internal IEnumerable<ScanHead> EnabledHeads => ScanHeads.Where(sh => sh.Enabled);
-
-        /// <summary>
-        /// Aggregated network communication statistics for all <see cref="Pinchot.ScanHead"/> objects.
-        /// </summary>
-        internal CommStatsEventArgs CommStats { get; private set; } = new CommStatsEventArgs();
-
-        internal bool CommStatsEnabled;
-
-        internal double EncoderPulseInterval { get; set; }
+        internal ScanSyncData LatestScanSyncData => scanSyncReceiver.LatestData;
 
         #endregion
 
@@ -118,7 +132,7 @@ namespace JoeScan.Pinchot
         /// </param>
         public ScanSystem(ScanSystemUnits units)
         {
-            EncoderPulseInterval = 1.0;
+            ResolutionPresets.Load();
             Units = units;
             DiscoverDevices();
         }
@@ -156,10 +170,9 @@ namespace JoeScan.Pinchot
                     scanHead?.Dispose();
                 }
 
-                cancellationTokenSource?.Cancel();
-                cancellationTokenSource?.Dispose();
                 keepAliveTokenSource?.Cancel();
                 keepAliveTokenSource?.Dispose();
+                scanSyncReceiver?.Dispose();
             }
 
             disposed = true;
@@ -224,6 +237,7 @@ namespace JoeScan.Pinchot
             var discovery = discoveries[serialNumber];
             var scanHead = new ScanHead(this, discovery, serialNumber, id);
             idToScanHead[id] = scanHead;
+            profileBuffers = idToScanHead.Values.Select(sh => sh.Profiles).ToArray();
             return scanHead;
         }
 
@@ -263,6 +277,72 @@ namespace JoeScan.Pinchot
             return idToScanHead[id];
         }
 
+        /// <summary>
+        /// Prepares the scan system to begin scanning. If connected, this
+        /// function will send all of the necessary configuration data to all of the
+        /// scan heads. Provided that no changes are made to any of the scan heads
+        /// associated with the scan system, the API will skip sending this data to the
+        /// scan heads when calling <see cref="StartScanning(uint, DataFormat, ScanningMode)"/> and allow scanning to start faster.
+        /// </summary>
+        /// <remarks>
+        /// <list type="bullet">
+        /// <item><description>This method is invoked automatically when <see cref="Connect"/> is successful.</description></item>
+        /// <item><description>If not manually called between a successful connection and scanning,
+        /// it will be called automatically in <see cref="StartScanning(uint, DataFormat, ScanningMode)"/>.</description></item>
+        /// </list>
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="IsScanning"/> is <see langword="true"/>.
+        /// -or-<br/>
+        /// <see cref="IsConnected"/> is <see langword="true"/>.
+        /// </exception>
+        /// <seealso cref="IsConfigured"/>
+        public void PreSendConfiguration()
+        {
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException("Can not configure scan system while disconnected.");
+            }
+
+            if (IsScanning)
+            {
+                throw new InvalidOperationException("Can not configure scan system while scanning.");
+            }
+
+            if (!IsConfigured)
+            {
+                Parallel.ForEach(ScanHeads, sh =>
+                {
+                    if (sh.IsDirty(DirtyStateFlags.Window))
+                    {
+                        sh.SendAllWindows();
+                        sh.StoreAllAlignments();
+                    }
+
+                    if (sh.IsVersionCompatible(16, 1, 0))
+                    {
+                        if (sh.IsDirty(DirtyStateFlags.ExclusionMask))
+                        {
+                            sh.SendAllExclusionMasks();
+                        }
+
+                        if (sh.IsDirty(DirtyStateFlags.BrightnessCorrection))
+                        {
+                            sh.SendAllBrightnessCorrections();
+                        }
+                    }
+
+                    sh.ClearDirty();
+                    sh.RequestStatus();
+                });
+            }
+
+            if (!IsConfigured || phaseTableIsDirty)
+            {
+                UpdateCameraLaserConfigurations();
+            }
+        }
+
         // TODO: wait for connect should be optional
         /// <summary>
         /// Attempts to connect to all <see cref="ScanHeads"/>s.
@@ -272,8 +352,6 @@ namespace JoeScan.Pinchot
         /// that did not successfully connect.</returns>
         /// <exception cref="InvalidOperationException">
         /// <see cref="ScanHeads"/> does not contain any <see cref="ScanHead"/>s.<br/>
-        /// -or-<br/>
-        /// <see cref="ScanHeads"/> does not contain any enabled <see cref="ScanHead"/>s.<br/>
         /// -or-<br/>
         /// <see cref="IsConnected"/> is `true`.<br/>
         /// -or-<br/>
@@ -291,11 +369,6 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("No scan heads in scan system.");
             }
 
-            if (!EnabledHeads.Any())
-            {
-                throw new InvalidOperationException("No scan heads are enabled.");
-            }
-
             if (IsConnected)
             {
                 throw new InvalidOperationException("Already connected.");
@@ -306,7 +379,7 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Already scanning.");
             }
 
-            foreach (var sh in EnabledHeads)
+            foreach (var sh in ScanHeads)
             {
                 if (!discoveries.ContainsKey(sh.SerialNumber))
                 {
@@ -327,50 +400,26 @@ namespace JoeScan.Pinchot
                 sh.Version = discovery.Version;
             }
 
-            Parallel.ForEach(EnabledHeads, sh =>
-            {
-                sh.Connect(ConnectionType, connectTimeout);
-                sh.StatsEvent += UpdateCommStats;
-            });
+            Parallel.ForEach(ScanHeads, sh => sh.Connect(ConnectionType, connectTimeout));
 
             if (IsConnected)
             {
-                Parallel.ForEach(EnabledHeads, sh =>
+                foreach (var sh in ScanHeads)
                 {
-                    if (sh.IsVersionCompatible(16, 1, 0))
+                    var goodCameras = sh.CachedStatus.DetectedCameras;
+                    string badCameras = string.Join(",", sh.Cameras.Except(goodCameras));
+                    if (badCameras.Any())
                     {
-                        sh.SendAllExclusionMasks();
-                        sh.SendAllBrightnessCorrections();
-                    }
-
-                    sh.SendAllWindows();
-                    sh.RequestStatus();
-                });
-
-                foreach (var sh in EnabledHeads)
-                {
-                    if (sh.CachedStatus.NumValidCameras != sh.Cameras.Count())
-                    {
-                        var goodCameras = sh.CachedStatus.PixelsInWindow.Keys;
-                        string badCameras = string.Join(",", sh.Cameras.Except(goodCameras));
                         throw new InvalidOperationException(
                             $"Couldn't detect cameras: {badCameras}!\n" +
                             "Something might be broken internally!");
                     }
                 }
 
-                cancellationTokenSource = new CancellationTokenSource();
-                token = cancellationTokenSource.Token;
-                if (CommStatsEnabled)
-                {
-                    CommStats = new CommStatsEventArgs();
-                    previousCommStats.Clear();
-                    statsThread = new Thread(StatsThread) { Priority = ThreadPriority.Lowest, IsBackground = true };
-                    statsThread.Start();
-                }
+                PreSendConfiguration();
             }
 
-            return EnabledHeads.Where(sh => !sh.IsConnected).ToList().AsReadOnly();
+            return ScanHeads.Where(sh => !sh.IsConnected).ToList().AsReadOnly();
         }
 
         /// <summary>
@@ -393,7 +442,7 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Can not disconnect while still scanning.");
             }
 
-            foreach (var s in EnabledHeads)
+            foreach (var s in ScanHeads)
             {
                 s.Disconnect();
             }
@@ -415,17 +464,24 @@ namespace JoeScan.Pinchot
         /// </remarks>
         /// <param name="periodUs">The scan period in microseconds.</param>
         /// <param name="dataFormat">The <see cref="DataFormat"/>.</param>
+        /// <param name="mode">The <see cref="ScanningMode"/>.</param>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `false`.<br/>
         /// -or-<br/>
-        /// <see cref="IsScanning"/> is `true`.
+        /// <see cref="IsScanning"/> is `true`.<br/>
+        /// -or-<br/>
+        /// There are duplicate elements from the same scan head in the phase table.
         /// </exception>
         /// <exception cref="ArgumentOutOfRangeException">
         /// Requested scan period <paramref name="periodUs"/> is invalid.
         /// </exception>
-        public void StartScanning(uint periodUs, DataFormat dataFormat)
+        /// <exception cref="VersionCompatibilityException">
+        /// A scan head has a firmware version that is incompatible with frame
+        /// scanning (when <paramref name="mode"/> is <see cref="ScanningMode.Frame"/>).
+        /// </exception>
+        public void StartScanning(uint periodUs, DataFormat dataFormat, ScanningMode mode = ScanningMode.Profile)
         {
-            StartScanning(periodUs, (AllDataFormat)dataFormat);
+            StartScanning(periodUs, (AllDataFormat)dataFormat, mode);
         }
 
         /// <summary>
@@ -434,7 +490,7 @@ namespace JoeScan.Pinchot
         /// <remarks>
         /// Physical scan heads will take approximately 0.5-1.0 seconds to stop scanning after <see cref="StopScanning"/>
         /// is called. <see cref="IProfile"/>s will remain in the profile buffers until they are either consumed
-        /// or <see cref="StartScanning(uint, DataFormat)"/> is called.
+        /// or <see cref="StartScanning(uint, DataFormat, ScanningMode)"/> is called.
         /// </remarks>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsScanning"/> is `false`.
@@ -446,10 +502,10 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Attempting to stop scanning when not scanning.");
             }
 
-            foreach (var scanHead in EnabledHeads)
+            Parallel.ForEach(ScanHeads, scanHead =>
             {
                 scanHead.StopScanning();
-            }
+            });
 
             IsScanning = false;
             keepAliveTokenSource.Cancel();
@@ -478,15 +534,130 @@ namespace JoeScan.Pinchot
 
             // user can send scan window after connecting now so we need to check the
             // scan head to see what the min period is
-            Parallel.ForEach(EnabledHeads, sh =>
-            {
-                sh.RequestStatus();
-            });
+            Parallel.ForEach(ScanHeads, sh => sh.RequestStatus());
 
             uint phaseTableDurationUs = (uint)CalculatePhaseDurations().Sum(d => d);
             uint cameraOffsetUs = (uint)Math.Ceiling(CameraStartEarlyOffsetNs / 1000.0);
 
             return phaseTableDurationUs + cameraOffsetUs;
+        }
+
+        /// <summary>
+        /// Tries to take an <see cref="IProfile"/> from any profile queue in <see cref="ScanHeads"/>,
+        /// blocking if all the queues are empty.
+        /// </summary>
+        /// <param name="profile">The dequeued <see cref="IProfile"/>.</param>
+        /// <param name="token">Token to observe.</param>
+        /// <returns><see langword="true"/> if a profile was taken else <see langword="false"/>.</returns>
+        /// <remarks>The profile queues are not guarenteed to be taken from equally or in any order.</remarks>
+        public bool TakeAnyProfile(out IProfile profile, CancellationToken token = default)
+        {
+            // returns the index of the item taken or -1 if no item was taken
+            int idx = BlockingCollection<IProfile>.TakeFromAny(profileBuffers, out profile, token);
+            return idx != -1;
+        }
+
+        /// <summary>
+        /// Tries to take an <see cref="IProfile"/> from any profile queue in <see cref="ScanHeads"/>.
+        /// </summary>
+        /// <param name="profile">The dequeued <see cref="IProfile"/>.</param>
+        /// <param name="timeout">The time to wait for a profile when all the queues are empty.</param>
+        /// <param name="token">Token to observe.</param>
+        /// <returns><see langword="true"/> if a profile was taken else <see langword="false"/>.</returns>
+        /// <remarks>The profile queues are not guarenteed to be taken from equally or in any order.</remarks>
+        public bool TryTakeAnyProfile(out IProfile profile, TimeSpan timeout = default, CancellationToken token = default)
+        {
+            // returns the index of the item taken or -1 if no item was taken
+            int idx = BlockingCollection<IProfile>.TryTakeFromAny(profileBuffers, out profile, timeout.Milliseconds, token);
+            return idx != -1;
+        }
+
+        /// <summary>
+        /// Tries to take an <see cref="IFrame"/>, blocking if one isn't ready.
+        /// </summary>
+        /// <param name="token">The <see cref="CancellationToken"/> to observe.</param>
+        /// <returns>The dequeued <see cref="IFrame"/>.</returns>
+        /// <exception cref="OperationCanceledException">
+        /// <paramref name="token"/> gets canceled.
+        /// </exception>
+        public IFrame TakeFrame(CancellationToken token = default)
+        {
+            TryTakeFrame(out var frame, TimeSpan.MaxValue, token);
+
+            // "Take" methods canonically throw an exception when a
+            // token is canceled rather than gracefully returning
+            if (token.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(token);
+            }
+
+            return frame;
+        }
+
+        /// <summary>
+        /// Tries to take an <see cref="IFrame"/>.
+        /// </summary>
+        /// <param name="frame">The dequeued <see cref="IFrame"/> or <see langword="null"/>.</param>
+        /// <param name="timeout">Time to wait for an <see cref="IFrame"/> to be taken.</param>
+        /// <param name="token">The <see cref="CancellationToken"/> to observe.</param>
+        /// <returns>
+        /// <see langword="true"/> if an <see cref="IFrame"/> was successfully taken,
+        /// otherwise <see langword="false"/> if <paramref name="timeout"/> elapsed or
+        /// <paramref name="token"/> was canceled.
+        /// </returns>
+        public bool TryTakeFrame(out IFrame frame, TimeSpan timeout = default, CancellationToken token = default)
+        {
+            if (!WaitForFrame(timeout, token))
+            {
+                frame = null;
+                return false;
+            }
+
+            frame = new Frame(currentSequence, profilesPerFrame);
+            var profileSpan = (frame as Frame).ProfileSpan;
+
+            bool isComplete = true;
+            int idx = 0;
+            foreach (var sh in ScanHeads)
+            {
+                int len = sh.QueueManager.NumQueues;
+                var slots = profileSpan.Slice(idx, len);
+                isComplete &= sh.QueueManager.Dequeue(slots, currentSequence);
+                if (sh.Orientation == ScanHeadOrientation.CableIsDownstream)
+                {
+                    slots.Reverse();
+                }
+
+                idx += len;
+            }
+
+            (frame as Frame).IsComplete = isComplete;
+
+            currentSequence++;
+            return true;
+        }
+
+        /// <summary>
+        /// Empties the internal client side software buffers used to store frames.
+        /// <para>
+        /// Under normal scanning conditions where the application consumes frames as they become available,
+        /// this function will not be needed. Its use is to be found in cases where the application fails to
+        /// consume frames after some time and the number of buffered frames becomes more than the application
+        /// can consume and only the most recent scan data is desired.
+        /// </para>
+        /// <para>
+        /// When operating in profile scanning mode, use <see cref="ScanHead.ClearProfiles"/> instead.
+        /// </para>
+        /// </summary>
+        /// <remarks>
+        /// Frames are automatically cleared when <see cref="StartScanning(uint, DataFormat, ScanningMode)"/> is called.
+        /// </remarks>
+        public void ClearFrames()
+        {
+            foreach (var sh in ScanHeads)
+            {
+                sh.QueueManager.Clear();
+            }
         }
 
         #endregion
@@ -495,7 +666,7 @@ namespace JoeScan.Pinchot
 
         internal void StartScanningSubpixel(uint periodUs, SubpixelDataFormat dataFormat)
         {
-            StartScanning(periodUs, (AllDataFormat)dataFormat);
+            StartScanning(periodUs, (AllDataFormat)dataFormat, ScanningMode.Profile);
         }
 
         /// <summary>
@@ -528,6 +699,7 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Failed to remove scan head.");
             }
 
+            profileBuffers = idToScanHead.Values.Select(sh => sh.Profiles).ToArray();
             ClearPhaseTable();
         }
 
@@ -546,61 +718,14 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Can not remove scan head while scanning.");
             }
 
-            foreach (var scanHead in EnabledHeads)
+            foreach (var scanHead in ScanHeads)
             {
                 scanHead?.Dispose();
             }
 
             idToScanHead.Clear();
+            profileBuffers = default;
             ClearPhaseTable();
-        }
-
-        /// <summary>
-        /// Iterates through all <see cref="ScanHead" /> objects that were told to scan through
-        /// the <see cref="StartScanning(uint, DataFormat)"/> method and tries to remove the first available profile
-        /// while observing a cancellation token.
-        /// </summary>
-        /// <param name="profile">The profile to be removed from the collection.</param>
-        /// <param name="token">Cancellation token to observe.</param>
-        /// <returns><c>true</c> if a profile was successfully taken, <c>false</c> otherwise.</returns>
-        internal bool TryTakeNextProfile(out IProfile profile, CancellationToken token)
-        {
-            return TryTakeNextProfile(out profile, TimeSpan.FromMilliseconds(-1), token);
-        }
-
-        /// <summary>
-        /// Iterates through all <see cref="ScanHead" /> objects that were told to scan through
-        /// the <see cref="StartScanning(uint, DataFormat)"/> method and tries to remove the first available profile
-        /// in the specified time period while observing a cancellation token.
-        /// </summary>
-        /// <param name="profile">The profile to be removed from the collection.</param>
-        /// <param name="timeout">An object that represents the number of milliseconds to wait,
-        /// or an object that represents -1 milliseconds to wait indefinitely.</param>
-        /// <param name="token">Cancellation token to observe.</param>
-        /// <returns><c>true</c> if a profile was successfully taken, <c>false</c> otherwise.</returns>
-        internal bool TryTakeNextProfile(out IProfile profile, TimeSpan timeout, CancellationToken token)
-        {
-            var stopwatch = new Stopwatch();
-            stopwatch.Start();
-            profile = new Profile();
-            while (!token.IsCancellationRequested)
-            {
-                // TODO: this should be improved to ensure all scan heads are taken from
-                foreach (var scanHead in EnabledHeads)
-                {
-                    if (scanHead.Profiles.TryTake(out profile, 0, token))
-                    {
-                        return true;
-                    }
-                }
-
-                if (!timeout.Equals(TimeSpan.FromMilliseconds(-1)) && (stopwatch.Elapsed > timeout))
-                {
-                    return false;
-                }
-            }
-
-            return false;
         }
 
         internal void SaveScanHeads(FileInfo fileInfo)
@@ -648,14 +773,17 @@ namespace JoeScan.Pinchot
                 idToScanHead[scanHead.ID] = scanHead;
             }
 
+            profileBuffers = idToScanHead.Values.Select(sh => sh.Profiles).ToArray();
+
             return scanHeadsImported;
+
         }
 
         #endregion
 
         #region Private Methods
 
-        private void StartScanning(uint periodUs, AllDataFormat dataFormat)
+        private void StartScanning(uint periodUs, AllDataFormat dataFormat, ScanningMode mode)
         {
             if (!IsConnected)
             {
@@ -667,7 +795,10 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Attempting to start scanning while already scanning.");
             }
 
+            PreSendConfiguration();
+
             long minScanPeriodUs = GetMinScanPeriod();
+
             if (periodUs < minScanPeriodUs)
             {
                 throw new ArgumentOutOfRangeException(nameof(periodUs),
@@ -675,56 +806,82 @@ namespace JoeScan.Pinchot
                     $"Requested {periodUs}µs but minimum is {minScanPeriodUs}µs.");
             }
 
-            foreach (var scanHead in EnabledHeads)
+            if (mode == ScanningMode.Frame)
             {
-                scanHead.CameraLaserConfigurations.Clear();
-            }
-
-            var durationsUs = CalculatePhaseDurations();
-            uint currPhaseEndOffsetNs = CameraStartEarlyOffsetNs;
-
-            foreach ((var phase, int phaseNumber) in phaseTable.Select((p, it) => (p, it)))
-            {
-                currPhaseEndOffsetNs += durationsUs[phaseNumber] * 1000;
-
-                foreach (var element in phase.Elements)
+                foreach (var sh in ScanHeads)
                 {
-                    var scanHead = element.ScanHead;
-
-                    uint maxGroups = scanHead.Specification.MaxConfigurationGroups;
-                    if (scanHead.CameraLaserConfigurations.Count >= maxGroups)
+                    if (!sh.IsVersionCompatible(16, 2, 0))
                     {
-                        throw new InvalidOperationException($"Scan head {scanHead.ID} cannot have more than {maxGroups} camera laser configurations.");
+                        throw new VersionCompatibilityException("Frame scanning is only compatible with scan heads on firmware version 16.2.0 or greater.");
                     }
+                }
 
-                    var camera = scanHead.CameraPortToId(element.CameraPort);
-                    var laser = scanHead.LaserPortToId(element.LaserPort);
-                    var pair = new CameraLaserPair(camera, laser);
-                    var conf = element.Configuration ?? scanHead.Configuration;
-                    var clc = new Client::CameraLaserConfigurationT
-                    {
-                        CameraPort = element.CameraPort,
-                        LaserPort = element.LaserPort,
-                        LaserOnTimeMinNs = conf.MinLaserOnTimeUs * 1000,
-                        LaserOnTimeDefNs = conf.DefaultLaserOnTimeUs * 1000,
-                        LaserOnTimeMaxNs = conf.MaxLaserOnTimeUs * 1000,
-                        ScanEndOffsetNs = currPhaseEndOffsetNs,
-                        CameraOrientation = scanHead.GetCameraOrientation(pair)
-                    };
-
-                    scanHead.CameraLaserConfigurations.Add(clc);
+                var hasDuplicatePhaseElements = phaseTable.SelectMany(p => p.Elements)
+                                                 .GroupBy(e => new { e.ScanHead.ID, e.LaserPort, e.CameraPort })
+                                                 .Any(g => g.Count() > 1);
+                if (hasDuplicatePhaseElements)
+                {
+                    throw new InvalidOperationException("Duplicate element in phase table.");
                 }
             }
 
-            foreach (var scanHead in EnabledHeads)
+            // The API sets the time to start scanning to avoid a rollover bug that
+            // can occur within the firmware. This value was picked arbitrarily and
+            // tested to make sure it always sets a time in the future.
+            const ulong startScanningOffsetNs = 22_000_000;
+            ulong startScanningTimeNs = LatestScanSyncData.EncoderTimestampNs + startScanningOffsetNs;
+
+            Parallel.ForEach(ScanHeads, scanHead =>
             {
-                scanHead.StartScanning(periodUs, dataFormat);
+                scanHead.Mode = mode;
+                scanHead.StartScanning(periodUs, dataFormat, startScanningTimeNs);
+            });
+
+            if (mode == ScanningMode.Frame)
+            {
+                // precompute this so its not done on every call to take a frame
+                profilesPerFrame = ScanHeads.Sum(h => h.QueueManager.NumQueues);
             }
 
             IsScanning = true;
             keepAliveTokenSource = new CancellationTokenSource();
             keepAliveToken = keepAliveTokenSource.Token;
             Task.Run(KeepAliveLoop, keepAliveToken);
+        }
+
+        private bool WaitForFrame(TimeSpan timeout, CancellationToken token = default)
+        {
+            var start = DateTime.Now;
+            while (!token.IsCancellationRequested)
+            {
+                var seedStats = ScanHeads.First().QueueManager.GetStats();
+                long minSeq = seedStats.MinSeq;
+                long maxSize = seedStats.MaxSize;
+
+                foreach (var sh in ScanHeads.Skip(1))
+                {
+                    var stats = sh.QueueManager.GetStats();
+                    if (minSeq > stats.MinSeq) { minSeq = stats.MinSeq; }
+                    if (maxSize < stats.MaxSize) { maxSize = stats.MaxSize; }
+                }
+
+                if (minSeq >= currentSequence || maxSize >= FrameThreshold)
+                {
+                    return true;
+                }
+
+                if (DateTime.Now - start > timeout)
+                {
+                    // timeout
+                    return false;
+                }
+
+                // the actual time slept for depends on the system clock
+                // which typically has a resolution of around 10-15 ms
+                Thread.Sleep(10);
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -763,74 +920,15 @@ namespace JoeScan.Pinchot
             return ips;
         }
 
-        private void UpdateCommStats(object sender, CommStatsEventArgs args)
-        {
-            try
-            {
-                if (!previousCommStats.ContainsKey(args.ID))
-                {
-                    previousCommStats[args.ID] = new CommStatsEventArgs() { ID = args.ID };
-                }
-
-                CommStats.CompleteProfilesReceived += args.CompleteProfilesReceived - previousCommStats[args.ID].CompleteProfilesReceived;
-                CommStats.BytesReceived += args.BytesReceived - previousCommStats[args.ID].BytesReceived;
-                CommStats.Evicted += args.Evicted - previousCommStats[args.ID].Evicted;
-                CommStats.BadPackets += args.BadPackets - previousCommStats[args.ID].BadPackets;
-                CommStats.GoodPackets += args.GoodPackets - previousCommStats[args.ID].GoodPackets;
-
-                previousCommStats[args.ID] = args;
-            }
-            catch
-            {
-                // TODO-CCP: after removing NLog, this function started throwing exceptions. Probably a race
-                // condition. This catch is a bandaid, but seems to work.
-            }
-        }
-
-        private void StatsThread()
-        {
-            long lastCheck = timeBase.ElapsedMilliseconds;
-            long bytesReceivedSinceLastCheck = 0;
-            while (true)
-            {
-                try
-                {
-                    token.ThrowIfCancellationRequested();
-                    Task.Delay(200, token).Wait(token);
-                    long now = timeBase.ElapsedMilliseconds;
-                    CommStats.DataRate = (CommStats.BytesReceived - bytesReceivedSinceLastCheck) * 1000.0 /
-                                         (now - lastCheck);
-
-                    StatsEvent.Raise(this, new CommStatsEventArgs()
-                    {
-                        CompleteProfilesReceived = CommStats.CompleteProfilesReceived,
-                        ProfileRate = CommStats.ProfileRate,
-                        BytesReceived = CommStats.BytesReceived,
-                        Evicted = CommStats.Evicted,
-                        DataRate = CommStats.DataRate,
-                        BadPackets = CommStats.BadPackets,
-                        GoodPackets = CommStats.GoodPackets
-                    });
-
-                    lastCheck = now;
-                    bytesReceivedSinceLastCheck = CommStats.BytesReceived;
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-            }
-        }
-
         /// <summary>
         /// Sends periodic keep alive messages to the scan head. Should only be spun up
         /// when scanning, and should be killed (cancel token) when scanning stops.
         /// </summary>
         private async Task KeepAliveLoop()
         {
-            /// The server will keep itself scanning as long as it can send profile data
-            /// over TCP. This keep alive is really only needed to get scan head's to
-            /// recover in the event that they fail to send and go into idle state.
+            // The server will keep itself scanning as long as it can send profile data
+            // over TCP. This keep alive is really only needed to get scan head's to
+            // recover in the event that they fail to send and go into idle state.
             const int keepAliveIntervalMs = 1000;
 
             try
@@ -838,7 +936,7 @@ namespace JoeScan.Pinchot
                 while (IsScanning)
                 {
                     await Task.Delay(keepAliveIntervalMs, keepAliveToken).ConfigureAwait(false);
-                    foreach (var scanHead in EnabledHeads)
+                    foreach (var scanHead in ScanHeads)
                     {
                         scanHead.KeepAlive();
                     }
@@ -850,6 +948,50 @@ namespace JoeScan.Pinchot
             }
         }
 
+        private void UpdateCameraLaserConfigurations()
+        {
+            foreach (var sh in ScanHeads)
+            {
+                sh.CameraLaserConfigurations.Clear();
+            }
+
+            uint currPhaseEndOffsetNs = CameraStartEarlyOffsetNs;
+            var durationsUs = CalculatePhaseDurations();
+
+            foreach ((var phase, int phaseNumber) in phaseTable.Select((p, it) => (p, it)))
+            {
+                currPhaseEndOffsetNs += durationsUs[phaseNumber] * 1000;
+
+                foreach (var element in phase.Elements)
+                {
+                    var scanHead = element.ScanHead;
+
+                    uint maxGroups = scanHead.Specification.MaxConfigurationGroups;
+                    if (scanHead.CameraLaserConfigurations.Count >= maxGroups)
+                    {
+                        throw new InvalidOperationException($"Scan head {scanHead.ID} cannot have more than {maxGroups} camera laser configurations.");
+                    }
+
+                    var camera = scanHead.CameraPortToId(element.CameraPort);
+                    var laser = scanHead.LaserPortToId(element.LaserPort);
+                    var pair = new CameraLaserPair(camera, laser);
+                    var conf = element.Configuration ?? scanHead.Configuration;
+                    var clc = new Client::CameraLaserConfigurationT
+                    {
+                        CameraPort = element.CameraPort,
+                        LaserPort = element.LaserPort,
+                        LaserOnTimeMinNs = conf.MinLaserOnTimeUs * 1000,
+                        LaserOnTimeDefNs = conf.DefaultLaserOnTimeUs * 1000,
+                        LaserOnTimeMaxNs = conf.MaxLaserOnTimeUs * 1000,
+                        ScanEndOffsetNs = currPhaseEndOffsetNs,
+                        CameraOrientation = scanHead.GetCameraOrientation(pair)
+                    };
+
+                    scanHead.CameraLaserConfigurations.Add(clc);
+                }
+            }
+            phaseTableIsDirty = false;
+        }
         #endregion
     }
 }

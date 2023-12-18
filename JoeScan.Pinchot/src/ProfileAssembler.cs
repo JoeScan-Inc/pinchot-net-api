@@ -86,13 +86,6 @@ namespace JoeScan.Pinchot
 
             var rawPointsSpan = profile.RawPointsMemory.Span;
 
-            double cameraToMillXX = alignment.CameraToMillXX;
-            double cameraToMillXY = alignment.CameraToMillXY;
-            double cameraToMillYX = alignment.CameraToMillYX;
-            double cameraToMillYY = alignment.CameraToMillYY;
-            double shiftX = alignment.ShiftX;
-            double shiftY = alignment.ShiftY;
-
             if (dataTypes.HasFlag(DataType.XY))
             {
                 // Brightness is always accompanied by XY data so
@@ -126,9 +119,7 @@ namespace JoeScan.Pinchot
                     if (xraw != Globals.ServerProfileDataInvalidXY && yraw != Globals.ServerProfileDataInvalidXY)
                     {
                         profile.ValidPointCount++;
-                        rawPointsSpan[dstIdx].X = (float)((xraw * cameraToMillXX) - (yraw * cameraToMillXY) + shiftX);
-                        rawPointsSpan[dstIdx].Y = (float)((xraw * cameraToMillYX) + (yraw * cameraToMillYY) + shiftY);
-                        rawPointsSpan[dstIdx].Brightness = brightness;
+                        alignment.CameraToMill(ref rawPointsSpan[dstIdx], xraw, yraw, brightness);
                     }
                     else
                     {

@@ -31,7 +31,6 @@ namespace JoeScan.Pinchot
         private uint laserDetectionThreshold = 120;
         private uint saturationThreshold = 800;
         private uint saturationPercentage = 30;
-        private uint averageIntensity = 10;
 
         #endregion
 
@@ -185,31 +184,6 @@ namespace JoeScan.Pinchot
         /// The scan period in microseconds of a scan head in an idle state.
         /// </value>
         public uint IdleScanPeriodUs { get; set; }
-
-        #endregion
-
-        #region Internal Properties
-
-        /// <summary>
-        /// In modes where image data is requested, the auto-exposure control will try to keep the image's average brightness at this level.
-        /// If you find the image mode is too dark or too bright, then raise or lower this value accordingly. This setting
-        /// has no effect on the measurement of points; it only changes how the image data is scaled. 0-255. Default: 150
-        /// </summary>
-        /// /// <exception cref="ArgumentOutOfRangeException"></exception>
-        [JsonProperty(nameof(AverageIntensity))]
-        internal uint AverageIntensity
-        {
-            get => averageIntensity;
-            set
-            {
-                if (value > 255)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(value), "AverageIntensity out of range (0-255)");
-                }
-
-                averageIntensity = value;
-            }
-        }
 
         #endregion
 

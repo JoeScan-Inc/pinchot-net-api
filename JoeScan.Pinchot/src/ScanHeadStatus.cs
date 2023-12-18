@@ -36,10 +36,10 @@ namespace JoeScan.Pinchot
 
         /// <summary>
         /// Gets the total number of profiles sent during the last scan sequence (between calls to
-        /// <see cref="ScanSystem.StartScanning(uint, DataFormat)"/> and <see cref="ScanSystem.StopScanning"/>).
+        /// <see cref="ScanSystem.StartScanning(uint, DataFormat, ScanningMode)"/> and <see cref="ScanSystem.StopScanning"/>).
         /// </summary>
         /// <value>The total number of profiles sent during the last scan sequence (between calls to
-        /// <see cref="ScanSystem.StartScanning(uint, DataFormat)"/> and <see cref="ScanSystem.StopScanning"/>).</value>
+        /// <see cref="ScanSystem.StartScanning(uint, DataFormat, ScanningMode)"/> and <see cref="ScanSystem.StopScanning"/>).</value>
         public uint ProfilesSentCount { get; internal set; }
 
         /// <summary>
@@ -60,13 +60,13 @@ namespace JoeScan.Pinchot
         internal uint NumValidEncoders { get; set; }
 
         /// <summary>
-        /// Gets the number of valid cameras on the scan head.
+        /// Gets the cameras that the server detected.
         /// </summary>
-        /// <value>The number of valid cameras.</value>
-        internal uint NumValidCameras { get; set; }
+        /// <value>Cameras that the server detected.</value>
+        internal IList<Camera> DetectedCameras { get; set; }
 
         /// <summary>
-        /// Gets the total number of UDP packets sent during the last scan period.
+        /// Gets the total number of packets sent during the last scan period.
         /// </summary>
         /// <value>The number of packets sent.</value>
         internal uint NumPacketsSent { get; set; }
@@ -99,9 +99,8 @@ namespace JoeScan.Pinchot
             GlobalTimeNs = data.GlobalTimeNs;
             NumPacketsSent = data.NumPacketsSent;
             ProfilesSentCount = data.NumProfilesSent;
-            NumValidEncoders = (uint)data.Encoders.Count;
-            NumValidCameras = (uint)data.CameraData.Count;
 
+            NumValidEncoders = (uint)data.Encoders.Count;
             EncoderValues = new Dictionary<Encoder, long>();
             for (int i = 0; i < NumValidEncoders; ++i)
             {
@@ -109,12 +108,13 @@ namespace JoeScan.Pinchot
                 EncoderValues.Add((Encoder)i, val);
             }
 
+            DetectedCameras = new List<Camera>();
             PixelsInWindow = new Dictionary<Camera, uint>();
             Temperatures = new Dictionary<TemperatureSensor, float>();
-            for (int i = 0; i < NumValidCameras; ++i)
+            foreach (var cameraData in data.CameraData)
             {
-                var cameraData = data.CameraData[i];
                 var camera = (Camera)spec.CameraPortToId[(int)cameraData.Port];
+                DetectedCameras.Add(camera);
                 PixelsInWindow.Add(camera, cameraData.PixelsInWindow);
                 Temperatures.Add((TemperatureSensor)camera, cameraData.Temperature);
             }

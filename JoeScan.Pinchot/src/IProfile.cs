@@ -73,6 +73,7 @@ namespace JoeScan.Pinchot
         /// Gets the total number of packets expected to comprise the profile.
         /// </summary>
         /// <value>The total number of packets expected.</value>
+        [Obsolete("Will be removed in a future release.")]
         uint PacketsExpected { get; }
 
         /// <summary>
@@ -80,6 +81,7 @@ namespace JoeScan.Pinchot
         /// then the profile data is incomplete. Generally, this implies some type of network issue.
         /// </summary>
         /// <value>The number of packets received.</value>
+        [Obsolete("Will be removed in a future release.")]
         uint PacketsReceived { get; }
 
         /// <summary>

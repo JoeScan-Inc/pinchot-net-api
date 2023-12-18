@@ -5,6 +5,7 @@
 
 using Newtonsoft.Json;
 using System;
+using System.Runtime.CompilerServices;
 
 namespace JoeScan.Pinchot
 {
@@ -142,14 +143,17 @@ namespace JoeScan.Pinchot
 
             // Camera units are in 1/1000 of an inch
             const int cameraToApiScale = 1000;
-            CameraToMillXX = cosYaw * cosRoll * CameraToMillScale / cameraToApiScale;
-            CameraToMillXY = sinRoll * CameraToMillScale / cameraToApiScale;
-            CameraToMillYX = cosYaw * sinRoll * CameraToMillScale / cameraToApiScale;
-            CameraToMillYY = cosRoll * CameraToMillScale / cameraToApiScale;
-            MillToCameraXX = cosNegYaw * cosNegRoll / CameraToMillScale * cameraToApiScale;
-            MillToCameraXY = cosNegYaw * sinNegRoll / CameraToMillScale * cameraToApiScale;
-            MillToCameraYX = sinNegRoll / CameraToMillScale * cameraToApiScale;
-            MillToCameraYY = cosNegRoll / CameraToMillScale * cameraToApiScale;
+            double toMillScale = CameraToMillScale / cameraToApiScale;
+            double toCameraScale = cameraToApiScale / CameraToMillScale;
+
+            CameraToMillXX = cosYaw * cosRoll * toMillScale;
+            CameraToMillXY = -sinRoll * toMillScale;
+            CameraToMillYX = cosYaw * sinRoll * toMillScale;
+            CameraToMillYY = cosRoll * toMillScale;
+            MillToCameraXX = cosNegYaw * cosNegRoll * toCameraScale;
+            MillToCameraXY = cosNegYaw * -sinNegRoll * toCameraScale;
+            MillToCameraYX = sinNegRoll * toCameraScale;
+            MillToCameraYY = cosNegRoll * toCameraScale;
         }
 
         /// <summary>
@@ -171,10 +175,27 @@ namespace JoeScan.Pinchot
         /// <returns>The transformed point.</returns>
         internal Point2D CameraToMill(double x, double y, int brightness)
         {
-            return new Point2D(
-                (x * CameraToMillXX) - (y * CameraToMillXY) + ShiftX,
-                (x * CameraToMillYX) + (y * CameraToMillYY) + ShiftY,
-                brightness);
+            var point = new Point2D();
+            CameraToMill(ref point, x, y, brightness);
+            return point;
+        }
+
+        /// <summary>
+        /// Transform a point from its camera coordinate system to the mill coordinate system
+        /// using an existing point as the destination for the transformed data. This function
+        /// is meant to be as fast as possible for the inner scan loop.
+        /// </summary>
+        /// <param name="point">The point to modify.</param>
+        /// <param name="x">The point's X value.</param>
+        /// <param name="y">The point's Y value.</param>
+        /// <param name="brightness">The point's brightness value.</param>
+        /// <returns>The transformed point.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal void CameraToMill(ref Point2D point, double x, double y, int brightness)
+        {
+            point.X = (float)((x * CameraToMillXX) + (y * CameraToMillXY) + ShiftX);
+            point.Y = (float)((x * CameraToMillYX) + (y * CameraToMillYY) + ShiftY);
+            point.Brightness = brightness;
         }
 
         /// <summary>
@@ -197,7 +218,7 @@ namespace JoeScan.Pinchot
         internal Point2D MillToCamera(double x, double y, int brightness)
         {
             return new Point2D(
-                ((x - ShiftX) * MillToCameraXX) - ((y - ShiftY) * MillToCameraXY),
+                ((x - ShiftX) * MillToCameraXX) + ((y - ShiftY) * MillToCameraXY),
                 ((x - ShiftX) * MillToCameraYX) + ((y - ShiftY) * MillToCameraYY),
                 brightness);
         }

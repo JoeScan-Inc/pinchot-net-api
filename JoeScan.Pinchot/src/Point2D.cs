@@ -46,6 +46,7 @@ namespace JoeScan.Pinchot
         /// Checks if the point holds valid data.
         /// </summary>
         /// <value><see langword="true"/> if point is valid else <see langword="false"/>.</value>
+        [JsonIgnore]
         public bool IsValid => !float.IsNaN(Y);
 
         #endregion
