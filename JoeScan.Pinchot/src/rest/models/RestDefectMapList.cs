@@ -3,14 +3,14 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace JoeScan.Pinchot
 {
     internal class RestDefectMapList
     {
-        [JsonProperty("maps")]
-        internal List<string> DefectMaps { get; set; }
+        [JsonPropertyName("maps")]
+        public List<string> DefectMaps { get; set; }
     }
 }

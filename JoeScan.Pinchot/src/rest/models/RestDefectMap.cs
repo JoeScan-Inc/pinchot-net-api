@@ -3,47 +3,47 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace JoeScan.Pinchot
 {
     internal class CorrectionTableEntry
     {
-        [JsonProperty("column")]
-        internal int Column { get; set; }
+        [JsonPropertyName("column")]
+        public int Column { get; set; }
 
-        [JsonProperty("offset")]
-        internal float Offset { get; set; }
+        [JsonPropertyName("offset")]
+        public float Offset { get; set; }
 
-        [JsonProperty("row")]
-        internal int Row { get; set; }
+        [JsonPropertyName("row")]
+        public int Row { get; set; }
     }
-    
+
     internal class RestDefectMap
     {
-        [JsonProperty("correction_table")]
-        internal List<CorrectionTableEntry> CorrectionTable { get; set; }
+        [JsonPropertyName("correction_table")]
+        public List<CorrectionTableEntry> CorrectionTable { get; set; }
 
-        [JsonProperty("time")]
-        internal string Time { get; set; }
+        [JsonPropertyName("time")]
+        public string Time { get; set; }
 
-        [JsonProperty("uuid")]
-        internal string UUID { get; set; }
+        [JsonPropertyName("uuid")]
+        public string UUID { get; set; }
 
-        [JsonProperty("camera_id")]
-        internal int CameraId { get; set; }
+        [JsonPropertyName("camera_id")]
+        public int CameraId { get; set; }
 
-        [JsonProperty("camera_port")]
-        internal int CameraPort { get; set; }
+        [JsonPropertyName("camera_port")]
+        public int CameraPort { get; set; }
 
-        [JsonProperty("serial")]
-        internal int Serial { get; set; }
+        [JsonPropertyName("serial"), JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+        public int Serial { get; set; }
 
-        [JsonProperty("version")]
-        internal float Version { get; set; }
+        [JsonPropertyName("version")]
+        public float Version { get; set; }
 
-        [JsonProperty("temperature_c")]
-        internal float TemperatureC { get; set; }
+        [JsonPropertyName("temperature_c")]
+        public float TemperatureC { get; set; }
     }
 }

@@ -3,20 +3,20 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace JoeScan.Pinchot
 {
     internal class RestChannelAlignment
     {
-        [JsonProperty("camera")]
-        internal List<ChannelAlignment> Cameras { get; set; }
+        [JsonPropertyName("camera")]
+        public List<ChannelAlignment> Cameras { get; set; }
     }
 
     internal class ChannelAlignment
     {
-        [JsonProperty("channel")]
-        internal List<double> Channels;
+        [JsonPropertyName("channel")]
+        public List<double> Channels { get; set; }
     }
 }

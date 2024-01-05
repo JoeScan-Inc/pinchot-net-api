@@ -3,11 +3,9 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -726,57 +724,6 @@ namespace JoeScan.Pinchot
             idToScanHead.Clear();
             profileBuffers = default;
             ClearPhaseTable();
-        }
-
-        internal void SaveScanHeads(FileInfo fileInfo)
-        {
-            if (fileInfo is null)
-            {
-                throw new ArgumentNullException(nameof(fileInfo));
-            }
-
-            if (!Directory.Exists(fileInfo.DirectoryName))
-            {
-                Directory.CreateDirectory(fileInfo.DirectoryName);
-            }
-
-#if NETSTANDARD2_1_OR_GREATER || NET5_0_OR_GREATER
-            using var file = File.CreateText(fileInfo.FullName);
-            var serializer = new JsonSerializer() { Formatting = Formatting.Indented };
-            serializer.Serialize(file, ScanHeads);
-#else
-            using (var file = File.CreateText(fileInfo.FullName))
-            {
-                var serializer = new JsonSerializer() { Formatting = Formatting.Indented };
-                serializer.Serialize(file, ScanHeads);
-            }
-#endif
-        }
-
-        internal ICollection<ScanHead> LoadScanHeads(FileInfo fileInfo)
-        {
-            if (fileInfo is null)
-            {
-                throw new ArgumentNullException(nameof(fileInfo));
-            }
-
-            if (!File.Exists(fileInfo.FullName))
-            {
-                throw new ArgumentException($"{fileInfo.FullName} does not exist.");
-            }
-
-            RemoveAllScanHeads();
-            var scanHeadsImported = JsonConvert.DeserializeObject<ICollection<ScanHead>>(File.ReadAllText(fileInfo.FullName));
-            foreach (var scanHead in scanHeadsImported)
-            {
-                scanHead.SetScanSystem(this);
-                idToScanHead[scanHead.ID] = scanHead;
-            }
-
-            profileBuffers = idToScanHead.Values.Select(sh => sh.Profiles).ToArray();
-
-            return scanHeadsImported;
-
         }
 
         #endregion

@@ -3,19 +3,14 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
-
 namespace JoeScan.Pinchot
 {
     internal class ScanWindowConstraint
     {
-        [JsonProperty]
         internal Point2D P0 { get; }
 
-        [JsonProperty]
         internal Point2D P1 { get; }
 
-        [JsonConstructor]
         internal ScanWindowConstraint(Point2D p0, Point2D p1)
         {
             P0 = p0;

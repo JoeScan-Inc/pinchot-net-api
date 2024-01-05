@@ -3,7 +3,6 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System;
 using System.Runtime.CompilerServices;
 
@@ -22,7 +21,6 @@ namespace JoeScan.Pinchot
         /// Gets a value indicating the orientation of the scan head.
         /// Set during initialization of a new instance of a <see cref="AlignmentParameters"/> object.
         /// </summary>
-        [JsonProperty(nameof(Orientation))]
         internal ScanHeadOrientation Orientation
         {
             get => orientation;
@@ -37,7 +35,6 @@ namespace JoeScan.Pinchot
         /// Gets the rotation around the Z axis in the mill coordinate system.
         /// Set during initialization of a new instance of a <see cref="AlignmentParameters"/> object.
         /// </summary>
-        [JsonProperty(nameof(Roll))]
         internal double Roll
         {
             get => roll;
@@ -52,17 +49,14 @@ namespace JoeScan.Pinchot
         /// Get the translation along the X axis in the mill coordinate system in <see cref="ScanSystemUnits"/>.
         /// Set during initialization of a new instance of a <see cref="AlignmentParameters"/> object.
         /// </summary>
-        [JsonProperty(nameof(ShiftX))]
         internal double ShiftX { get; }
 
         /// <summary>
         /// Gets the translation along the Y axis in the mill coordinate system in <see cref="ScanSystemUnits"/>.
         /// Set during initialization of a new instance of a <see cref="AlignmentParameters"/> object.
         /// </summary>
-        [JsonProperty(nameof(ShiftY))]
         internal double ShiftY { get; }
 
-        [JsonProperty(nameof(CameraToMillScale))]
         internal double CameraToMillScale
         {
             get => cameraToMillScale;
@@ -106,7 +100,6 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// One or more arguments are <see cref="double.NegativeInfinity"/> or <see cref="double.PositiveInfinity"/>.
         /// </exception>
-        [JsonConstructor]
         internal AlignmentParameters(double cameraToMillScale, double roll, double shiftX, double shiftY, ScanHeadOrientation orientation)
         {
             if (double.IsNaN(roll) || double.IsNaN(shiftX) || double.IsNaN(shiftY))

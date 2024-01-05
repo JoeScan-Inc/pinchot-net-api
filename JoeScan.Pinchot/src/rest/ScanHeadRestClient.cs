@@ -3,7 +3,6 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using RestSharp;
 using System;
 using System.Collections.Generic;
@@ -36,31 +35,32 @@ namespace JoeScan.Pinchot
         {
             var req = new RestRequest(endpoint, Method.Get);
             req.AddHeader("Content-Type", "application/json");
-            var response = RestClient.ExecuteAsync(req).Result;
+            var response = RestClient.ExecuteAsync<T>(req).Result;
             if (!response.IsSuccessful)
             {
                 throw new WebException($"REST GET {endpoint} to {IpAddress} failed: {response.StatusCode} {response.ErrorMessage}");
             }
-            return JsonConvert.DeserializeObject<T>(response.Content);
+
+            return response.Data;
         }
 
         private static T PerformRestGetRequest<T>(string endpoint, RestClient client)
         {
             var req = new RestRequest(endpoint, Method.Get);
             req.AddHeader("Content-Type", "application/json");
-            var response = client.ExecuteAsync(req).Result;
+            var response = client.ExecuteAsync<T>(req).Result;
             if (!response.IsSuccessful)
             {
                 throw new WebException($"REST GET {endpoint} to failed: {response.StatusCode} {response.ErrorMessage}");
             }
-            return JsonConvert.DeserializeObject<T>(response.Content);
+
+            return response.Data;
         }
 
         private void PerformRestPostRequest(string endpoint, object body)
         {
             var req = new RestRequest(endpoint, Method.Post);
-            string data = JsonConvert.SerializeObject(body);
-            req.AddStringBody(data, "application/json");
+            req.AddJsonBody(body);
             var response = RestClient.ExecuteAsync(req).Result;
             if (!response.IsSuccessful)
             {

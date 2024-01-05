@@ -3,17 +3,17 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace JoeScan.Pinchot
 {
     internal class RestUuids
     {
-        [JsonProperty("camera")]
-        internal List<ulong> Camera { get; set; }
+        [JsonPropertyName("camera")]
+        public List<ulong> Camera { get; set; }
 
-        [JsonProperty("mainboard")]
-        internal ulong Mainboard { get; set; }
+        [JsonPropertyName("mainboard")]
+        public ulong Mainboard { get; set; }
     }
 }

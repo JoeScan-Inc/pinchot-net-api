@@ -3,23 +3,23 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace JoeScan.Pinchot
 {
     internal class RestTemperatureSensors
     {
-        [JsonProperty("mainboardHumidity")]
-        internal float MainboardHumidity { get; set; }
+        [JsonPropertyName("mainboardHumidity")]
+        public float MainboardHumidity { get; set; }
 
-        [JsonProperty("camera")]
-        internal List<float> Cameras { get; set; }
+        [JsonPropertyName("camera")]
+        public List<float> Cameras { get; set; }
 
-        [JsonProperty("mainboard")]
-        internal float Mainboard { get; set; }
+        [JsonPropertyName("mainboard")]
+        public float Mainboard { get; set; }
 
-        [JsonProperty("ps")]
-        internal float PS { get; set; }
+        [JsonPropertyName("ps")]
+        public float PS { get; set; }
     }
 }

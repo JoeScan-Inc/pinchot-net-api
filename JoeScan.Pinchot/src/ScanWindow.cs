@@ -3,7 +3,6 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,7 +22,6 @@ namespace JoeScan.Pinchot
     /// </remarks>
     public sealed class ScanWindow : ICloneable
     {
-        [JsonProperty(nameof(WindowConstraints))]
         internal IList<ScanWindowConstraint> WindowConstraints = new List<ScanWindowConstraint>();
 
         private ScanWindow()

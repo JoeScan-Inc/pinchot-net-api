@@ -3,14 +3,23 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-// This application shows how one can stream profile data from multiple scan
-// heads in a manner that allows for real time processing of the data. To
-// accomplish this, multiple threads are created to break up the work of
-// reading in new profile data and acting upon it. Configuration of the scan
-// heads will mostly be identical to previous examples although some values
-// may be changed to allow for faster streaming of data.
+// NOTE: Frame Scanning is the recommended mode of scanning for most
+// applications. The below example is provided for legacy purposes and
+// for customers requiring low level access.
+//
+// While Frame Scanning is recommended for most applications, users looking
+// for greater manual control of their scan heads, or needing to distribute the
+// CPU load across multiple cores, can make use of "Low Level Scanning". When
+// scanning in this manner, the profiles are returned individually for each
+// scan head and it is the responsibility of the developer to reassemble the
+// profiles. It is recommened with Low Level Scanning mode to create a thread
+// for each individual scan head in order to achieve the highest performance.
 
 using JoeScan.Pinchot;
+
+// Global variable that will contain the total count
+// of profiles received from all heads.
+int totalProfiles = 0;
 
 // Set up a token and bind it it Ctrl+C to allow stopping the application early.
 using CancellationTokenSource cts = new();
@@ -116,34 +125,34 @@ foreach (var scanHead in scanSystem.ScanHeads)
 uint minScanPeriodUs = scanSystem.GetMinScanPeriod();
 Console.WriteLine($"Min scan period of {minScanPeriodUs} µs");
 
-const DataFormat format = DataFormat.XYBrightnessFull;
-
 // To begin scanning on all of the scan heads, all we need to do is
 // command the scan system to start scanning. This will cause all of the
 // scan heads associated with it to begin scanning at the specified rate
-// and data format. Note the `ScanningMode` enum to tell the system to
-// use frame scanning.
-scanSystem.StartScanning(minScanPeriodUs, format, ScanningMode.Frame);
+// and data format.
+const DataFormat format = DataFormat.XYBrightnessFull;
+scanSystem.StartScanning(minScanPeriodUs, format);
 Console.WriteLine("Scanning...");
 
-// Create a receiver thread to allow the main thread to do other things.
-// This is especially important in GUI applications as to not lock up the
-// main UI thread.
-var receiver = new Thread(() => Receiver())
+// In order to achieve a performant application, we'll create a thread
+// for each scan head. This allows the CPU load of reading out profiles
+// to be distributed across all the cores available on the system rather
+// than keeping the heavy lifting in an application within a single process.
+var threads = new List<Thread>();
+foreach (var scanHead in scanSystem.ScanHeads)
 {
-    // For applications with heavy CPU load, it is advised to boost the priority
-    // of the thread reading out the frame data. If the thread reading out the
-    // scan data falls behind, data will be dropped, causing problems later on
-    // when trying to analyze what was scanned.
-    Priority = ThreadPriority.Highest
-};
+    var thread = new Thread(() => Receiver(scanHead));
+    thread.Start();
+    threads.Add(thread);
+}
 
-receiver.Start();
+// The current thread can now go on to do other things while the receiver
+// threads gather profiles. This is especially important in GUI applications
+// as to not lock up the main UI thread.
 
 try
 {
     // Wait for a time to allow receiver threads to
-    // collect and process a number of frames.
+    // collect and process a number of profiles.
     var scanTime = TimeSpan.FromSeconds(5);
     await Task.Delay(scanTime, token);
 }
@@ -154,50 +163,68 @@ catch (TaskCanceledException) { }
 // scan system to stop scanning.
 scanSystem.StopScanning();
 Console.WriteLine("Stop scanning");
-receiver.Join();
+threads.ForEach(thread => thread.Join());
+
+// We can verify that we received all of the profiles sent by the scan
+// heads by reading each scan head's status message and summing up the
+// number of profiles that were sent. If everything went well and the
+// CPU load didn't exceed what the system can manage, this value should
+// be equal to the number of profiles we received in this application.
+long expectedProfilesCount = scanSystem.ScanHeads.Sum(sh => sh.RequestStatus().ProfilesSentCount);
+Console.WriteLine($"Number of profiles received: {totalProfiles}");
+Console.WriteLine($"Number of profiles expected: {expectedProfilesCount}");
 
 /// <summary>
-/// This function receives frame data from a scan system.
+/// This function receives profile data from a given scan head. We start
+/// a thread for each scan head to pull out the data as fast as possible.
 /// </summary>
-void Receiver()
+void Receiver(ScanHead scanHead)
 {
-    int frameCount = 0;
-    int profilesReceived = 0;
-    int profilesExpected = 0;
-
-    while (scanSystem.IsScanning)
+    try
     {
-        // Note that taking a frame uses a `ScanSystem` object instead of a `ScanHead`.
-        if (!scanSystem.TryTakeFrame(out IFrame frame, TimeSpan.FromSeconds(1), token))
+        var profiles = new List<IProfile>();
+        while (scanSystem.IsScanning || scanHead.NumberOfProfilesAvailable > 0)
         {
-            continue;
-        }
-
-        frameCount++;
-
-        // An `IFrame` object contains "slots" that hold either a valid profile or `null`. The number of
-        // slots is determined by the total number of unique phaseable elements there are in the system.
-        // For instance, a WX would contribute 2 slots (Camera A & B) to the system whereas an X6B would
-        // contribute 6 (Laser 1-6). A system of 10 WXs would therefore have a frame size of 20 slots.
-        profilesExpected += frame.Count;
-
-        for (int i = 0; i < frame.Count; i++)
-        {
-            IProfile? profile = frame[i];
-
-            // Check for invalid slots. A slot can be `null` if the corresponding element is not scheduled
-            // in the phase table or if something happened that causes a profile to not be received by the
-            // scan system in a timely fashion (network issues, CPU performance issues, etc).
-            if (profile == null)
+            if (!scanHead.TryTakeNextProfile(out IProfile profile, TimeSpan.FromSeconds(1), token))
             {
                 continue;
             }
 
-            profilesReceived++;
+            profiles.Add(profile);
+            Interlocked.Increment(ref totalProfiles);
+
+            // Wait for 100 profiles before processing.
+            if (profiles.Count < 100)
+            {
+                continue;
+            }
+
+            // For this example, we'll grab some profiles and then act on the data before
+            // repeating this process again. Note that for high performance applications,
+            // printing to the console while receiving data should be avoided as it
+            // can add significant latency. This example only prints to the console to
+            // provide some illustrative feedback to the user, indicating that data
+            // is actively being worked on in multiple threads.
+            var maxPoint = new Point2D();
+            foreach (var p in profiles)
+            {
+                // Not all points in a profile contain valid data so filter
+                // out the bad ones with this convenience function.
+                foreach (var point in p.GetValidXYPoints())
+                {
+                    if (point.Y > maxPoint.Y)
+                    {
+                        maxPoint = point;
+                    }
+                }
+            }
+
+            Console.WriteLine($"Scan head {scanHead.ID}: [{maxPoint.X:F3}, {maxPoint.Y:F3}]");
+            profiles.Clear();
         }
     }
-
-    Console.WriteLine($"Frames received: {frameCount}");
-    Console.WriteLine($"Profiles received: {profilesReceived}");
-    Console.WriteLine($"Profiles expected: {profilesExpected}");
+    catch (OperationCanceledException)
+    {
+        // Thrown by TryTakeNextProfile when the token cancelled, gracefully exit
+    }
 }

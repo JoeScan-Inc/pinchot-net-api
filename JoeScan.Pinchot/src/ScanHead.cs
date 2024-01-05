@@ -4,7 +4,6 @@
 // root for license information.
 
 using JoeScan.Pinchot.Beta;
-using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -64,7 +63,6 @@ namespace JoeScan.Pinchot
         /// Gets the product name of the scan head.
         /// </summary>
         /// <value>The product name of the scan head.</value>
-        [JsonIgnore]
         public string Name { get; private set; }
 
         /// <summary>
@@ -83,14 +81,12 @@ namespace JoeScan.Pinchot
         /// Gets the object that defines the various physical limits and features of a scan head.
         /// </summary>
         /// <value>The object that defines the various physical limits and features of a scan head.</value>
-        [JsonIgnore]
         public ScanHeadCapabilities Capabilities { get; private set; }
 
         /// <summary>
         /// Gets the <see cref="IPAddress"/> of the scan head.
         /// </summary>
         /// <value>The <see cref="IPAddress"/> of the scan head.</value>
-        [JsonIgnore]
         public IPAddress IpAddress { get; internal set; }
 
         /// <summary>
@@ -102,14 +98,12 @@ namespace JoeScan.Pinchot
         /// This is particularly important on computers that have multiple NICs or a NIC with dual ports.
         /// Whichever NIC discovered the scan head should be responsible for making the connection.
         /// </remarks>
-        [JsonIgnore]
         public IPAddress ClientIpAddress { get; internal set; }
 
         /// <summary>
         /// Gets a value indicating whether the network connection to the scan head is established.
         /// </summary>
         /// <value>A value indicating whether the network connection to the scan head is established.</value>
-        [JsonIgnore]
         public bool IsConnected { get; private set; }
 
         /// <summary>
@@ -135,7 +129,6 @@ namespace JoeScan.Pinchot
         /// Gets the <see cref="ScanHeadVersionInformation"/> of the firmware on the scan head.
         /// </summary>
         /// <value>The <see cref="ScanHeadVersionInformation"/> of the firmware on the scan head.</value>
-        [JsonIgnore]
         public ScanHeadVersionInformation Version { get; internal set; }
 
         /// <summary>
@@ -148,7 +141,6 @@ namespace JoeScan.Pinchot
         /// This value means nothing when scanning with <see cref="ScanningMode.Frame"/>.
         /// </remarks>
         /// <value>The number of <see cref="IProfile"/>s available in the local buffer for the scan head.</value>
-        [JsonIgnore]
         public int NumberOfProfilesAvailable => Profiles.Count;
 
         /// <summary>
@@ -156,14 +148,12 @@ namespace JoeScan.Pinchot
         /// </summary>
         /// <remarks>Resets to <see langword="false"/> when <see cref="ScanSystem.StartScanning(uint, DataFormat, ScanningMode)"/> is called successfully.</remarks>
         /// <value>A value indicating whether the scan head profile buffer overflowed.</value>
-        [JsonIgnore]
         public bool ProfileBufferOverflowed => senderReceiver.ProfileBufferOverflowed || QueueManager.FrameQueueOverflowed;
 
         /// <summary>
         /// Gets an <see cref="IEnumerable{T}"/> that can be used to iterate over all valid cameras.
         /// </summary>
         /// <value>An <see cref="IEnumerable{T}"/> that can be used to iterate over all valid cameras.</value>
-        [JsonIgnore]
         public IEnumerable<Camera> Cameras
         {
             get
@@ -180,7 +170,6 @@ namespace JoeScan.Pinchot
         /// Gets an <see cref="IEnumerable{T}"/> that can be used to iterate over all valid lasers.
         /// </summary>
         /// <value>An <see cref="IEnumerable{T}"/> that can be used to iterate over all valid lasers.</value>
-        [JsonIgnore]
         public IEnumerable<Laser> Lasers
         {
             get
@@ -201,7 +190,6 @@ namespace JoeScan.Pinchot
         /// The most recent <see cref="ScanHeadStatus"/> received from a call to <see cref="RequestStatus"/>.
         /// </summary>
         /// <value>The most recent <see cref="ScanHeadStatus"/> received from the scan head.</value>
-        [JsonIgnore]
         internal ScanHeadStatus CachedStatus { get; private set; }
 
         /// <summary>
@@ -210,7 +198,6 @@ namespace JoeScan.Pinchot
         /// </summary>
         /// <seealso cref="Configure"/>
         /// <value>The <see cref="ScanHeadConfiguration"/> used to configure the scan head.</value>
-        [JsonProperty(nameof(Configuration))]
         internal ScanHeadConfiguration Configuration { get; private set; }
             = new ScanHeadConfiguration();
 
@@ -244,11 +231,9 @@ namespace JoeScan.Pinchot
         /// transform the data from a camera based coordinate system to one based on
         /// mill placement. Read Only. Use SetAlignment to set all alignment values.
         /// </summary>
-        [JsonProperty(nameof(Alignments))]
         internal Dictionary<CameraLaserPair, AlignmentParameters> Alignments { get; }
             = new Dictionary<CameraLaserPair, AlignmentParameters>();
 
-        [JsonProperty(nameof(Windows))]
         internal Dictionary<CameraLaserPair, ScanWindow> Windows { get; }
             = new Dictionary<CameraLaserPair, ScanWindow>();
 
@@ -258,7 +243,6 @@ namespace JoeScan.Pinchot
         internal Dictionary<CameraLaserPair, BrightnessCorrection> BrightnessCorrections { get; }
             = new Dictionary<CameraLaserPair, BrightnessCorrection>();
 
-        [JsonProperty(nameof(Units))]
         internal ScanSystemUnits Units { get; }
 
         internal double CameraToMillScale => Units == ScanSystemUnits.Millimeters ? 25.4 : 1.0;
@@ -304,7 +288,6 @@ namespace JoeScan.Pinchot
             Version = device.Version;
         }
 
-        [JsonConstructor]
         internal ScanHead(ProductType type, uint serialNumber, uint id, ScanSystemUnits units)
         {
             if (units != ScanSystemUnits.Millimeters && units != ScanSystemUnits.Inches)
@@ -1024,6 +1007,7 @@ namespace JoeScan.Pinchot
         /// <exception cref="ArgumentException">
         /// <paramref name="camera"/> isn't valid.
         /// </exception>
+        [Obsolete("Use GetDiagnosticCameraImage(Camera, uint, DiagnosticImageType) instead.")]
         public CameraImage GetDiagnosticCameraImage(Camera camera, DiagnosticImageType imageDataType = DiagnosticImageType.Masked)
         {
             return GetDiagnosticCameraImage(camera, Configuration.DefaultCameraExposureTimeUs, imageDataType);
@@ -1078,6 +1062,7 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// <paramref name="laser"/> isn't valid.
         /// </exception>
+        [Obsolete("Use GetDiagnosticCameraImage(Camera, uint, Laser, uint, DiagnosticImageType) instead.")]
         public CameraImage GetDiagnosticCameraImage(Camera camera, Laser laser, DiagnosticImageType imageDataType = DiagnosticImageType.Masked)
         {
             return GetDiagnosticCameraImage(camera, Configuration.DefaultLaserOnTimeUs, laser, Configuration.DefaultLaserOnTimeUs, imageDataType);
@@ -1105,6 +1090,7 @@ namespace JoeScan.Pinchot
         /// <exception cref="ArgumentOutOfRangeException">
         /// <paramref name="laserOnTimeUs"/> is too long or too short.
         /// </exception>
+        [Obsolete("Use GetDiagnosticCameraImage(Camera, uint, Laser, uint, DiagnosticImageType) instead.")]
         public CameraImage GetDiagnosticCameraImage(Camera camera, Laser laser, uint laserOnTimeUs, DiagnosticImageType imageDataType = DiagnosticImageType.Masked)
         {
             return GetDiagnosticCameraImage(camera, laserOnTimeUs, laser, laserOnTimeUs, imageDataType);

@@ -11,7 +11,8 @@ namespace JoeScan.Pinchot
     /// <summary>
     /// Enumeration for configuring the image data type when getting a diagnostic image.
     /// </summary>
-    /// <seealso cref="ScanHead.GetDiagnosticCameraImage(Camera, DiagnosticImageType)"/>
+    /// <seealso cref="ScanHead.GetDiagnosticCameraImage(Camera, uint, DiagnosticImageType)"/>
+    /// <seealso cref="ScanHead.GetDiagnosticCameraImage(Camera, uint, Laser, uint, DiagnosticImageType)"/>
     public enum DiagnosticImageType
     {
         /// <summary>

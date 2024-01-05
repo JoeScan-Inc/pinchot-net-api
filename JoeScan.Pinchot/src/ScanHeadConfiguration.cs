@@ -3,7 +3,6 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System;
 
 namespace JoeScan.Pinchot
@@ -65,29 +64,23 @@ namespace JoeScan.Pinchot
 
         /// <summary>
         /// Gets the lower bound of the image mode auto-exposure algorithm in microseconds.
-        /// Use <see cref="SetCameraExposureTime"/> to set all camera exposure values.
-        /// This allows the API to validate that the parameters are valid and consistent.
         /// </summary>
         /// <value>The lower bound of the image mode auto-exposure algorithm in microseconds.</value>
-        /// <seealso cref="SetCameraExposureTime"/>
+        [Obsolete("Camera exposure is only used when getting a diagnostic image.")]
         public uint MinCameraExposureTimeUs { get; private set; } = MinExposureTimeDefaultUs;
 
         /// <summary>
         /// Gets the starting value of the image mode auto-exposure algorithm in microseconds.
-        /// Use <see cref="SetCameraExposureTime"/> to set all camera exposure values.
-        /// This allows the API to validate that the parameters are valid and consistent.
         /// </summary>
         /// <value>The starting value of the image mode auto-exposure algorithm in microseconds.</value>
-        /// <seealso cref="SetCameraExposureTime"/>
+        [Obsolete("Camera exposure is only used when getting a diagnostic image.")]
         public uint DefaultCameraExposureTimeUs { get; private set; } = DefExposureTimeDefaultUs;
 
         /// <summary>
         /// Gets the upper bound of the image mode auto-exposure algorithm in microseconds.
-        /// Use <see cref="SetCameraExposureTime"/> to set all camera exposure values.
-        /// This allows the API to validate that the parameters are valid and consistent.
         /// </summary>
         /// <value>The upper bound of the image mode auto-exposure algorithm in microseconds.</value>
-        /// <seealso cref="SetCameraExposureTime"/>
+        [Obsolete("Camera exposure is only used when getting a diagnostic image.")]
         public uint MaxCameraExposureTimeUs { get; private set; } = MaxExposureTimeDefaultUs;
 
         /// <summary>
@@ -196,7 +189,6 @@ namespace JoeScan.Pinchot
         {
         }
 
-        [JsonConstructor]
         internal ScanHeadConfiguration(uint minLaserOnTimeUs, uint defaultLaserOnTimeUs, uint maxLaserOnTimeUs,
             uint minCameraExposureTimeUs, uint defaultCameraExposureTimeUs, uint maxCameraExposureTimeUs)
         {
@@ -259,6 +251,7 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// <paramref name="maxTimeUs"/> must be greater or equal to <paramref name="defaultTimeUs"/>
         /// </exception>
+        [Obsolete("Camera exposure is only used when getting a diagnostic image.")]
         public void SetCameraExposureTime(uint minTimeUs, uint defaultTimeUs, uint maxTimeUs)
         {
             if (minTimeUs > defaultTimeUs)

@@ -3,7 +3,6 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System;
 using System.Diagnostics;
 
@@ -31,22 +30,16 @@ namespace JoeScan.Pinchot
         /// <value>The Y coordinate value in <see cref="ScanSystemUnits"/>.</value>
         public float Y { get; set; }
 
-        // NOTE: If we ever serialize profile data as JSON then the [JsonIgnore] will have to go.
-        // This was added since window constraints use this struct and serializing a scan head in
-        // SensorTester added a bunch of junk brightness fields. This will be solved when a new
-        // data type is created for either the constraints or the profile data.
         /// <summary>
         /// Gets or sets the brightness value.
         /// </summary>
         /// <value>The brightness value.</value>
-        [JsonIgnore]
         public int Brightness { get; set; }
 
         /// <summary>
         /// Checks if the point holds valid data.
         /// </summary>
         /// <value><see langword="true"/> if point is valid else <see langword="false"/>.</value>
-        [JsonIgnore]
         public bool IsValid => !float.IsNaN(Y);
 
         #endregion

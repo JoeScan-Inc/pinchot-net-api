@@ -3,12 +3,23 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-// This example application demonstrates how to configure, connect, and
-// disconnect from a single scan head. For configuring the scan head, functions
-// and data structures from the Pinchot API will be introduced and utilized in
-// a friendly manner. Following successful configuration, the application will
-// connect to the scan head, print out its current status, and then finally
-// disconnect.
+// This example application provides a basic example of setting up a scan for
+// scanning using functions and data structures from the Pinchot API. In the
+// following order, the application will:
+//
+//    1. Create scan system and scan head
+//    2. Print out the scan head's capabilities
+//    3. Set the configuration for the scan head
+//    4. Build a basic phase table
+//    5. Connect to the scan head
+//    6. Print out the scan head's current status
+//    7. Disconnect from the scan head.
+//
+// Further information regarding  features demonstrated in this application can
+// be found online:
+//
+//    http://api.joescan.com/doc/v16/articles/js50-configuration.html
+//    http://api.joescan.com/doc/v16/articles/phase-table.html
 
 using JoeScan.Pinchot;
 
@@ -74,6 +85,53 @@ scanHead.SetAlignment(0, 0, 0);
 // changes to facilitate better cable routing within a mill environment.
 scanHead.Orientation = ScanHeadOrientation.CableIsUpstream;
 
+// For this example we will create a basic phase table that utilizes all of
+// the phasable elements of the scan head. Depending on the type of scan
+// head, we will need to either schedule its cameras or its lasers. The
+// bellow `switch` statement shows this process for each type of scan head.
+switch (scanHead.Type)
+{
+    // camera-driven scan heads
+    case ProductType.JS50WX or ProductType.JS50WSC or ProductType.JS50MX:
+        // example phase table for an WX:
+        //   Phase | Laser | Camera
+        //     1   |   1   |   A
+        //     2   |   1   |   B
+        foreach (var camera in scanHead.Cameras)
+        {
+            scanSystem.AddPhase();
+            scanSystem.AddPhaseElement(scanHead.ID, camera);
+        }
+        break;
+
+    // laser-driven scan heads
+    // for laser-driven scan heads, make sure to not schedule lasers
+    // that coorespond to the same camera in back-to-back phases as
+    // to not incur a throughput penalty
+    case ProductType.JS50X6B20 or ProductType.JS50X6B30 or ProductType.JS50Z820 or ProductType.JS50Z830:
+        // example phase table for an X6B:
+        //   Phase | Laser | Camera
+        //     1   |   1   |   B
+        //     2   |   4   |   A
+        //     3   |   2   |   B
+        //     4   |   5   |   A
+        //     5   |   3   |   B
+        //     6   |   6   |   A
+        int numLasers = scanHead.Lasers.Count();
+        for (int i = 0; i < numLasers / 2; i++)
+        {
+            var laser = Laser.Laser1 + i;
+            scanSystem.AddPhase();
+            scanSystem.AddPhaseElement(scanHead.ID, laser);
+            scanSystem.AddPhase();
+            scanSystem.AddPhaseElement(scanHead.ID, laser + (numLasers / 2));
+        }
+    break;
+
+    default:
+        throw new InvalidOperationException($"Invalid scan head type {scanHead.Type}");
+}
+
 // We've now successfully configured the scan head. Now comes the time to
 // connect to the physical scanner and transmit the configuration values
 // we previously set up.
@@ -85,25 +143,22 @@ if (scanHeadsThatFailedToConnect.Count > 0)
     return;
 }
 
+Console.WriteLine($"Connected to {scanHead.SerialNumber}");
+
 // Now that we are connected, we can query the scan head to get its current status.
 var status = scanHead.RequestStatus();
 Console.WriteLine("Status");
 Console.WriteLine($"\tGlobal time: {status.GlobalTimeNs} ns");
 Console.WriteLine($"\tEncoder: {status.EncoderValues[Encoder.Main]}");
-Console.WriteLine($"\tNumber of profiles sent: {status.ProfilesSentCount}");
 
-// Display the capabilties of the scan head. This will print out some physical
-// features and functional limits of the scan head.
-var capabilities = scanHead.Capabilities;
-Console.WriteLine("Capabilities");
-Console.WriteLine($"\tNumber of cameras: {capabilities.NumCameras}");
-Console.WriteLine($"\tNumber of lasers: {capabilities.NumLasers}");
-Console.WriteLine($"\tCamera image height: {capabilities.MaxCameraImageHeight}");
-Console.WriteLine($"\tCamera image width: {capabilities.MaxCameraImageWidth}");
-Console.WriteLine($"\tMax scan period: {capabilities.MaxScanPeriodUs}");
-Console.WriteLine($"\tMin scan period: {capabilities.MinScanPeriodUs}");
-Console.WriteLine($"\tMax supported encoders: {capabilities.MaxSupportedEncoders}");
-Console.WriteLine($"\tBrightness bit depth: {capabilities.CameraBrightnessBitDepth}");
+// The minimum scan period indicates the fastest that the scan system can
+// obtain profiles. This value is dependent upon the laser on time, the
+// size of the scan window, and the phase table. For this example with only
+// one scan head, only its configuration affects the minimum scan period.
+// With more scan heads in the scan system, they will collectively affect
+// this value.
+var minPeriodUs = scanSystem.GetMinScanPeriod();
+Console.WriteLine($"Min scan period: {minPeriodUs} us");
 
 // Once connected, this is the point where we could command the scan system
 // to start scanning to obtain profile data from the scan heads associated

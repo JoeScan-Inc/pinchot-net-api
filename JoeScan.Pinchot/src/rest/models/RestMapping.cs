@@ -3,8 +3,8 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace JoeScan.Pinchot
 {
@@ -17,7 +17,7 @@ namespace JoeScan.Pinchot
         /// Use the camera ID as an offset into this array to get
         /// the physical camera port mapping
         /// </summary>
-        [JsonProperty("camera")]
-        internal List<uint> Camera { get; set; }
+        [JsonPropertyName("camera")]
+        public List<uint> Camera { get; set; }
     }
 }

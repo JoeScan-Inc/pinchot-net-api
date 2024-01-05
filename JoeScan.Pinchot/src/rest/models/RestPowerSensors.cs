@@ -3,20 +3,20 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
-using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace JoeScan.Pinchot
 {
     internal class RestPowerSensors
     {
-        [JsonProperty("voltageRail")]
-        internal List<float> VoltageRails { get; set; }
+        [JsonPropertyName("voltageRail")]
+        public List<float> VoltageRails { get; set; }
 
-        [JsonProperty("currentRail")]
-        internal List<float> CurrentRails { get; set; }
+        [JsonPropertyName("currentRail")]
+        public List<float> CurrentRails { get; set; }
 
-        [JsonProperty("power")]
-        internal float Power { get; set; }
+        [JsonPropertyName("power")]
+        public float Power { get; set; }
     }
 }
