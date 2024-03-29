@@ -174,6 +174,16 @@ namespace JoeScan.Pinchot
             PerformRestPostRequest("config/mapple-correct-shift-down", new { enabled });
         }
 
+        internal void SetIntrinsicCorrectionShift(bool enabled)
+        {
+            PerformRestPostRequest("config/enable-intrinsic-correction", new { enabled });
+        }
+
+        internal IntrinsicCorrection GetIntrinsicCorrectionShift()
+        {
+            return PerformRestGetRequest<IntrinsicCorrection>("config/enable-intrinsic-correction");
+        }
+
         internal void LoadDefectMaps(IEnumerable<RestDefectMap> jsonDefectMaps)
         {
             foreach (RestDefectMap map in jsonDefectMaps)

@@ -26,23 +26,6 @@ namespace JoeScan.Pinchot
             }
         }
 
-        internal void Init(IEnumerable<CameraLaserPair> pairs)
-        {
-            if (Queues.Count > 0)
-            {
-                // queues exist already, just clear them
-                Clear();
-                return;
-            }
-
-            int bufferSize = Globals.ProfileQueueSize / pairs.Count();
-
-            foreach (var clp in pairs)
-            {
-                Queues.Add(clp, new FrameQueue(bufferSize));
-            }
-        }
-
         internal void EnqueueProfile(IProfile profile)
         {
             var pair = new CameraLaserPair(profile.Camera, profile.Laser);
@@ -121,6 +104,23 @@ namespace JoeScan.Pinchot
                 MaxSeq = maxSeq,
                 MinSeq = minSeq
             };
+        }
+
+        internal void SetValidCameraLaserPairs(IEnumerable<CameraLaserPair> pairs)
+        {
+            if (Queues.Keys.SequenceEqual(pairs))
+            {
+                return;
+            }
+
+            Queues.Clear();
+
+            int bufferSize = Globals.ProfileQueueSize / pairs.Count();
+
+            foreach (var clp in pairs)
+            {
+                Queues.Add(clp, new FrameQueue(bufferSize));
+            }
         }
     }
 }

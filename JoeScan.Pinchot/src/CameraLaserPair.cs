@@ -19,6 +19,11 @@ namespace JoeScan.Pinchot
             : base(camera, laser)
         {
         }
+
+        internal CameraLaserPair(ScanHead scanHead, uint cameraPort, uint laserPort)
+            : base(scanHead.CameraPortToId(cameraPort), scanHead.LaserPortToId(laserPort))
+        {
+        }
     }
 
     internal class CameraLaserPairConverter : TypeConverter

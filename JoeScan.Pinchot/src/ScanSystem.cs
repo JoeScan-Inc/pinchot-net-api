@@ -763,6 +763,16 @@ namespace JoeScan.Pinchot
                     }
                 }
 
+                var phaseElements = phaseTable.SelectMany(p => p.Elements);
+                foreach (var group in phaseElements.GroupBy(p => p.ScanHead))
+                {
+                    var scanHead = group.Key;
+                    var validElements = group.Select(g => new CameraLaserPair(scanHead, g.CameraPort, g.LaserPort));
+                    scanHead.QueueManager.SetValidCameraLaserPairs(validElements);
+                }
+
+                profilesPerFrame = ScanHeads.Sum(sh => sh.QueueManager.NumQueues);
+
                 var hasDuplicatePhaseElements = phaseTable.SelectMany(p => p.Elements)
                                                  .GroupBy(e => new { e.ScanHead.ID, e.LaserPort, e.CameraPort })
                                                  .Any(g => g.Count() > 1);
@@ -783,12 +793,6 @@ namespace JoeScan.Pinchot
                 scanHead.Mode = mode;
                 scanHead.StartScanning(periodUs, dataFormat, startScanningTimeNs);
             });
-
-            if (mode == ScanningMode.Frame)
-            {
-                // precompute this so its not done on every call to take a frame
-                profilesPerFrame = ScanHeads.Sum(h => h.QueueManager.NumQueues);
-            }
 
             IsScanning = true;
             keepAliveTokenSource = new CancellationTokenSource();

@@ -224,7 +224,7 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Gets the <see cref="FrameQueueManager"/> to read/write profile frames.
         /// </summary>
-        internal FrameQueueManager QueueManager { get; } = new FrameQueueManager();
+        internal FrameQueueManager QueueManager { get; private set; } = new FrameQueueManager();
 
         /// <summary>
         /// Gets the spatial transformation parameters of the scan head required to
@@ -1374,16 +1374,8 @@ namespace JoeScan.Pinchot
                     $"current scan head configuration {CachedStatus.MinScanPeriodUs}µs for scan head {ID}.");
             }
 
-            // TODO: Combine frame/profile queue logic
-            if (Mode == ScanningMode.Frame)
-            {
-                QueueManager.Init(CameraLaserPairs);
-            }
-            else
-            {
-                ClearProfiles();
-            }
-
+            ClearProfiles();
+            QueueManager.Clear();
             senderReceiver.StartScanning(periodUs, dataFormat, startTimeNs);
         }
 
