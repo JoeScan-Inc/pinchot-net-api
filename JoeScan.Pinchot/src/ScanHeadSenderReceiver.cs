@@ -1,4 +1,4 @@
-﻿// Copyright(c) JoeScan Inc. All Rights Reserved.
+// Copyright(c) JoeScan Inc. All Rights Reserved.
 //
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Client = joescan.schema.client;
@@ -46,7 +47,7 @@ namespace JoeScan.Pinchot
         private readonly byte[] KeepAliveRequest = new Client::MessageClientT() { Type = Client::MessageType.KEEP_ALIVE }.SerializeToBinary();
         private readonly byte[] StatusRequest = new Client::MessageClientT() { Type = Client::MessageType.STATUS_REQUEST }.SerializeToBinary();
 
-        #endregion
+        #endregion Private Fields
 
         #region Internal Properties
 
@@ -62,7 +63,7 @@ namespace JoeScan.Pinchot
 
         internal ScanningMode Mode { get; set; }
 
-        #endregion
+        #endregion Internal Properties
 
         #region Lifecycle
 
@@ -112,7 +113,7 @@ namespace JoeScan.Pinchot
             disposed = true;
         }
 
-        #endregion
+        #endregion Lifecycle
 
         #region Internal Methods
 
@@ -421,7 +422,7 @@ namespace JoeScan.Pinchot
             return buf;
         }
 
-        #endregion
+        #endregion Internal Methods
 
         #region Private Methods
 
@@ -469,30 +470,6 @@ namespace JoeScan.Pinchot
 
         private void QueueProfile(Profile profile)
         {
-            if (scanHead.Configuration.MinimumEncoderTravel != 0)
-            {
-                long currentEncoderCount = profile.EncoderValues[Encoder.Main];
-                long encoderTravel = currentEncoderCount - lastEncoderCount;
-                lastEncoderCount = currentEncoderCount;
-
-                if (encoderTravel < scanHead.Configuration.MinimumEncoderTravel)
-                {
-                    if (idleSkipCount == 0)
-                    {
-                        return;
-                    }
-                    else if (idleSkipCount == currentSkipCount)
-                    {
-                        currentSkipCount = 0;
-                    }
-                    else
-                    {
-                        ++currentSkipCount;
-                        return;
-                    }
-                }
-            }
-
             // TODO: unify profile and frame queueing
             if (Mode == ScanningMode.Profile)
             {
@@ -593,30 +570,32 @@ namespace JoeScan.Pinchot
                     }
 
                     var dataHeader = new DataPacketHeader(packet);
-
-                    if (profile == null)
-                    {
-                        profile = profileAssembler.CreateNewProfile(dataHeader);
-                    }
-                    else if (dataHeader.Source != lastID || dataHeader.TimestampNs != lastTimestamp)
-                    {
-                        ++IncompleteProfilesReceivedCount;
-                        QueueProfile(profile);
-                        profile = profileAssembler.CreateNewProfile(dataHeader);
-                    }
-
-                    bool isComplete = profileAssembler.ProcessPacket(profile, dataHeader, packet);
-
-                    if (isComplete)
-                    {
-                        ++CompleteProfilesReceivedCount;
-                        QueueProfile(profile);
-                        profile = null;
-                    }
-
                     lastID = dataHeader.Source;
                     lastTimestamp = dataHeader.TimestampNs;
-                }
+
+                    if (CanQueueProfile(dataHeader.MainEncoder))
+                    {
+                        if (profile == null)
+                        {
+                            profile = profileAssembler.CreateNewProfile(ref dataHeader);
+                        }
+                        else if (dataHeader.Source != lastID || dataHeader.TimestampNs != lastTimestamp)
+                        {
+                            ++IncompleteProfilesReceivedCount;
+                            QueueProfile(profile);
+                            profile = profileAssembler.CreateNewProfile(ref dataHeader);
+                        }
+
+                        bool isComplete = profileAssembler.ProcessPacket(profile, ref dataHeader, packet);
+
+                        if (isComplete)
+                        {
+                            ++CompleteProfilesReceivedCount;
+                            QueueProfile(profile);
+                            profile = null;
+                        }
+                    }
+                } // while (!token.IsCancellationRequested)
             }
             catch (Exception e)
             {
@@ -831,6 +810,35 @@ namespace JoeScan.Pinchot
             return message.SerializeToBinary();
         }
 
-        #endregion
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool CanQueueProfile(long mainEncoder)
+        {
+            if (scanHead.Configuration.MinimumEncoderTravel != 0)
+            {
+                long currentEncoderCount = mainEncoder;
+                long encoderTravel = currentEncoderCount - lastEncoderCount;
+                lastEncoderCount = currentEncoderCount;
+
+                if (encoderTravel < scanHead.Configuration.MinimumEncoderTravel)
+                {
+                    if (idleSkipCount == 0)
+                    {
+                        return false;
+                    }
+                    else if (idleSkipCount == currentSkipCount)
+                    {
+                        currentSkipCount = 0;
+                    }
+                    else
+                    {
+                        ++currentSkipCount;
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        #endregion Private Methods
     }
 }
