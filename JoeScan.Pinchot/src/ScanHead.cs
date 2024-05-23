@@ -7,6 +7,7 @@ using JoeScan.Pinchot.Beta;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -104,7 +105,13 @@ namespace JoeScan.Pinchot
         /// Gets a value indicating whether the network connection to the scan head is established.
         /// </summary>
         /// <value>A value indicating whether the network connection to the scan head is established.</value>
-        public bool IsConnected { get; private set; }
+        public bool IsConnected => senderReceiver?.IsConnected ?? false;
+
+        /// <summary>
+        /// Gets a value indicating whether the scan head is actively scanning.
+        /// </summary>
+        /// <value>A value indicating whether the scan head is actively scanning.</value>
+        public bool IsScanning => senderReceiver?.IsScanning ?? false;
 
         /// <summary>
         /// Gets or sets the value indicating the orientation of the scan head.
@@ -366,7 +373,7 @@ namespace JoeScan.Pinchot
         /// of the scan head.
         /// </param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.
         /// </exception>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="configuration"/> is `null`.
@@ -377,7 +384,7 @@ namespace JoeScan.Pinchot
         /// </exception>
         public void Configure(ScanHeadConfiguration configuration)
         {
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Can not set configuration while scanning.");
             }
@@ -532,9 +539,21 @@ namespace JoeScan.Pinchot
         /// <param name="timeout">The time to wait for a profile when the queue is empty.</param>
         /// <param name="token"><see cref="CancellationToken"/> to observe.</param>
         /// <returns>Whether a <see cref="IProfile"/> was successfully taken.</returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if <see cref="IsConnected"/> is <see langword="false"/> when timeout occurs while
+        /// waiting for a profile. This indicates a loss of communication with the scan head, either
+        /// by a possible network or power issue.
+        /// </exception>
         public bool TryTakeNextProfile(out IProfile profile, TimeSpan timeout = default, CancellationToken token = default)
         {
-            return Profiles.TryTake(out profile, (int)timeout.TotalMilliseconds, token);
+            bool success = Profiles.TryTake(out profile, (int)timeout.TotalMilliseconds, token);
+            if (!success && !IsConnected)
+            {
+                scanSystem.StopSystem();
+                throw new InvalidOperationException($"Scan head {SerialNumber} is not connected, possible network or power issue.");
+            }
+
+            return success;
         }
 
         /// <summary>
@@ -547,6 +566,11 @@ namespace JoeScan.Pinchot
         /// Use a <see cref="TimeSpan"/> that represents -1 milliseconds to wait indefinitely.</param>
         /// <param name="token"><see cref="CancellationToken"/> to observe.</param>
         /// <returns>An <see cref="IEnumerable{T}"/> of profiles.</returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if <see cref="IsConnected"/> is <see langword="false"/> when timeout occurs while
+        /// waiting for a profile. This indicates a loss of communication with the scan head, either
+        /// by a possible network or power issue.
+        /// </exception>
         public IEnumerable<IProfile> TryTakeProfiles(int maxCount, TimeSpan timeout = default, CancellationToken token = default)
         {
             for (int i = 0; i < maxCount; ++i)
@@ -573,6 +597,11 @@ namespace JoeScan.Pinchot
         /// Use a <see cref="TimeSpan"/> that represents -1 milliseconds to wait indefinitely.</param>
         /// <param name="token"><see cref="CancellationToken"/> to observe.</param>
         /// <returns>The number of profiles dequeued and placed in <paramref name="profiles"/>.</returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if <see cref="IsConnected"/> is <see langword="false"/> when timeout occurs while
+        /// waiting for a profile. This indicates a loss of communication with the scan head, either
+        /// by a possible network or power issue.
+        /// </exception>
         public int TryTakeProfiles(Span<IProfile> profiles, TimeSpan timeout = default, CancellationToken token = default)
         {
             for (int i = 0; i < profiles.Length; ++i)
@@ -599,11 +628,13 @@ namespace JoeScan.Pinchot
         /// <param name="shiftX">The shift along the X axis in the mill coordinate system in <see cref="ScanSystemUnits"/>.</param>
         /// <param name="shiftY">The shift along the Y axis in the mill coordinate system in <see cref="ScanSystemUnits"/>.</param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         public void SetAlignment(double rollDegrees, double shiftX, double shiftY)
         {
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Can not set alignment while scanning.");
             }
@@ -637,7 +668,9 @@ namespace JoeScan.Pinchot
         /// <param name="shiftX">The shift along the X axis in the mill coordinate system in <see cref="ScanSystemUnits"/>.</param>
         /// <param name="shiftY">The shift along the Y axis in the mill coordinate system in <see cref="ScanSystemUnits"/>.</param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// Trying to use a camera-driven function with a laser-driven scan head.
@@ -645,7 +678,7 @@ namespace JoeScan.Pinchot
         /// </exception>
         public void SetAlignment(Camera camera, double rollDegrees, double shiftX, double shiftY)
         {
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Can not set alignment while scanning.");
             }
@@ -680,7 +713,9 @@ namespace JoeScan.Pinchot
         /// <param name="shiftX">The shift along the X axis in the mill coordinate system in <see cref="ScanSystemUnits"/>.</param>
         /// <param name="shiftY">The shift along the Y axis in the mill coordinate system in <see cref="ScanSystemUnits"/>.</param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// Trying to use a laser-driven function with a camera-driven scan head.
@@ -688,7 +723,7 @@ namespace JoeScan.Pinchot
         /// </exception>
         public void SetAlignment(Laser laser, double rollDegrees, double shiftX, double shiftY)
         {
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Can not set alignment while scanning.");
             }
@@ -716,7 +751,9 @@ namespace JoeScan.Pinchot
         /// </summary>
         /// <param name="window">The <see cref="ScanWindow"/> to use for the scan head.</param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="window"/> is null.
@@ -741,7 +778,9 @@ namespace JoeScan.Pinchot
         /// <param name="camera">The <see cref="Camera"/> to apply the window to.</param>
         /// <param name="window">The <see cref="ScanWindow"/> to use for the scan head.</param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="window"/> is null.
@@ -763,7 +802,9 @@ namespace JoeScan.Pinchot
         /// <param name="laser">The <see cref="Laser"/> to apply the window to.</param>
         /// <param name="window">The <see cref="ScanWindow"/> to use for the scan head.</param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="window"/> is null.
@@ -795,7 +836,9 @@ namespace JoeScan.Pinchot
         /// <param name="camera">The <see cref="Camera"/> that the mask will be applied to.</param>
         /// <param name="mask">The <see cref="ExclusionMask"/> to be applied.</param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="mask"/> is null.
@@ -808,7 +851,7 @@ namespace JoeScan.Pinchot
         {
             ThrowIfNotVersionCompatible(16, 1, 0);
 
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Can not set exclusion mask while scanning.");
             }
@@ -840,7 +883,9 @@ namespace JoeScan.Pinchot
         /// <param name="laser">The <see cref="Laser"/> that the mask will be applied to.</param>
         /// <param name="mask">The <see cref="ExclusionMask"/> to be applied.</param>
         /// <exception cref="InvalidOperationException">
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="mask"/> is null.
@@ -853,7 +898,7 @@ namespace JoeScan.Pinchot
         {
             ThrowIfNotVersionCompatible(16, 1, 0);
 
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Can not set exclusion mask while scanning.");
             }
@@ -897,7 +942,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// Trying to use a camera-driven function with a laser-driven scan head.
@@ -924,7 +971,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// Trying to use a camera-driven function with a laser-driven scan head.
@@ -954,7 +1003,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// Trying to use a laser-driven function with a camera-driven scan head.
@@ -980,7 +1031,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// Trying to use a laser-driven function with a camera-driven scan head.
@@ -1002,7 +1055,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// <paramref name="camera"/> isn't valid.
@@ -1023,7 +1078,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// <paramref name="camera"/> isn't valid.
@@ -1055,7 +1112,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// <paramref name="camera"/> isn't valid.<br/>
@@ -1080,7 +1139,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// <paramref name="camera"/> isn't valid.<br/>
@@ -1108,7 +1169,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
         /// -or-<br/>
-        /// <see cref="ScanSystem.IsScanning"/> is <see langword="true"/>.
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentException">
         /// <paramref name="camera"/> isn't valid.<br/>
@@ -1128,7 +1191,7 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Not connected.");
             }
 
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Scan system is scanning.");
             }
@@ -1209,6 +1272,8 @@ namespace JoeScan.Pinchot
         /// <returns>The updated <see cref="ScanHeadStatus"/>.</returns>
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
         /// </exception>
         public ScanHeadStatus RequestStatus()
         {
@@ -1260,6 +1325,9 @@ namespace JoeScan.Pinchot
         /// seconds before the scan head will appear on the network and be available
         /// for use. On average, the scan head will take 30 seconds to reboot.
         /// </remarks>
+        /// <exception cref="IOException">
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
+        /// </exception>
         public void Reboot()
         {
             Reboot(SerialNumber);
@@ -1274,6 +1342,9 @@ namespace JoeScan.Pinchot
         /// seconds before the scan head will appear on the network and be available
         /// for use. On average, the scan head will take 30 seconds to reboot.
         /// </remarks>
+        /// <exception cref="IOException">
+        /// A loss of communication with the scan head occurred, usually caused by a network or power issue.
+        /// </exception>
         public static void Reboot(uint serial)
         {
             IPAddress ip;
@@ -1337,8 +1408,7 @@ namespace JoeScan.Pinchot
             senderReceiver?.Dispose();
             senderReceiver = new ScanHeadSenderReceiver(this);
 
-            IsConnected = senderReceiver.Connect(connType, timeout);
-            if (!IsConnected)
+            if (!senderReceiver.Connect(connType, timeout))
             {
                 return;
             }
@@ -1389,7 +1459,7 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal void SetWindow(CameraLaserPair pair, ScanWindow window)
         {
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Can not set scan window while scanning.");
             }
@@ -1506,7 +1576,6 @@ namespace JoeScan.Pinchot
 
         internal void Disconnect()
         {
-            IsConnected = false;
             dirtyState = DirtyStateFlags.AllDirty;
             senderReceiver.Disconnect();
         }
@@ -1554,7 +1623,7 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Not connected.");
             }
 
-            if (scanSystem.IsScanning)
+            if (IsScanning)
             {
                 throw new InvalidOperationException("Scan system is scanning.");
             }

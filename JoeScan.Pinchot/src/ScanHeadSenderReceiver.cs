@@ -50,6 +50,10 @@ namespace JoeScan.Pinchot
 
         #region Internal Properties
 
+        internal bool IsConnected { get; private set; }
+
+        internal bool IsScanning { get; private set; }
+
         internal bool ProfileBufferOverflowed { get; private set; }
 
         internal long CompleteProfilesReceivedCount { get; private set; }
@@ -57,8 +61,6 @@ namespace JoeScan.Pinchot
         internal long IncompleteProfilesReceivedCount { get; private set; }
 
         internal long BadPacketsCount { get; private set; }
-
-        internal Exception TcpException { get; private set; }
 
         internal ScanningMode Mode { get; set; }
 
@@ -102,9 +104,7 @@ namespace JoeScan.Pinchot
 
             if (disposing)
             {
-                tokenSource.Cancel();
-                tcpControlClient.Close();
-                tcpDataClient.Close();
+                Close();
                 tcpDataReceiveThread?.Join();
                 tokenSource.Dispose();
             }
@@ -118,10 +118,39 @@ namespace JoeScan.Pinchot
 
         internal bool Connect(Client::ConnectionType connType, TimeSpan timeout)
         {
+            if (scanHead.IpAddress == null)
+            {
+                Close();
+                return false;
+            }
+
+            var controlResult = tcpControlClient.BeginConnect(scanHead.IpAddress, Globals.ScanServerControlPort, null, null);
+            var dataResult = tcpDataClient.BeginConnect(scanHead.IpAddress, Globals.ScanServerDataPort, null, null);
+
+            foreach (var h in new WaitHandle[] { controlResult.AsyncWaitHandle, dataResult.AsyncWaitHandle })
+            {
+                if (!h.WaitOne(timeout))
+                {
+                    Close();
+                    return false;
+                }
+            }
+
+            try
+            {
+                tcpControlClient.EndConnect(controlResult);
+                tcpDataClient.EndConnect(dataResult);
+            }
+            catch (Exception e)
+            {
+                Close();
+                throw new IOException($"Scan head {scanHead.SerialNumber} has IP but connection was refused. Try power cycling the scan head.", e);
+            }
+
             BadPacketsCount = 0L;
             IncompleteProfilesReceivedCount = 0L;
 
-            byte[] message = new Client::MessageClientT()
+            byte[] connectMsg = new Client::MessageClientT()
             {
                 Type = Client.MessageType.CONNECT,
                 Data = new Client::MessageDataUnion()
@@ -137,56 +166,73 @@ namespace JoeScan.Pinchot
                 }
             }.SerializeToBinary();
 
-            return Connect(message, timeout);
+            TcpSendControl(connectMsg);
+
+            tokenSource = new CancellationTokenSource();
+            token = tokenSource.Token;
+
+            tcpDataReceiveThread = new Thread(TcpDataReceiveLoop)
+            {
+                Priority = ThreadPriority.Highest,
+                IsBackground = true
+            };
+
+            IsConnected = true;
+            tcpDataReceiveThread.Start();
+            return true;
         }
 
         internal void Disconnect()
         {
-            try
-            {
-                TcpSend(DisconnectRequest, TcpControlStream);
-            }
-            catch
-            {
-                // if the TCP connection was harshly severed then
-                // TcpSend would throw an exception, we should
-                // ignore this for two reasons:
-                // 1) we want to disconnect anyway
-                // 2) this would prevent the API from sending a
-                //    message to other heads
-            }
+            IsConnected = false;
 
-            tokenSource.Cancel();
+            // try to send disconnect message while ignoring any exceptions
+            // since we are going to close the connection anyway
+            try { TcpSendControl(DisconnectRequest); } catch { }
+            try { tokenSource?.Cancel(); } catch { }
+        }
+
+        /// <summary>
+        /// Close the data and control clients without sending a disconnect message.
+        /// This should be used when a TCP error is detected to completely close the
+        /// connection and stop any further communications to the scan head.
+        /// </summary>
+        internal void Close()
+        {
+            IsConnected = false;
+            try { tokenSource?.Cancel(); } catch { }
+            try { tcpControlClient?.Close(); } catch { }
+            try { tcpDataClient?.Close(); } catch { }
         }
 
         internal void SendWindow(CameraLaserPair pair)
         {
             byte[] windowReq = CreateWindowRectangularRequest(pair);
-            TcpSend(windowReq, TcpControlStream);
+            TcpSendControl(windowReq);
         }
 
         internal void SendExclusionMask(CameraLaserPair pair)
         {
             byte[] maskReq = CreateExclusionMaskRequest(pair);
-            TcpSend(maskReq, TcpControlStream);
+            TcpSendControl(maskReq);
         }
 
         internal void SendBrightnessCorrection(CameraLaserPair pair)
         {
             byte[] correctionReq = CreateBrightnessCorrectionRequest(pair);
-            TcpSend(correctionReq, TcpControlStream);
+            TcpSendControl(correctionReq);
         }
 
         internal void SendAlignmentStoreData(CameraLaserPair pair)
         {
             byte[] alignmentReq = CreateAlignmentStoreRequest(pair);
-            TcpSend(alignmentReq, TcpControlStream);
+            TcpSendControl(alignmentReq);
         }
 
         internal void SendCorrectionStoreData(CameraLaserPair pair, double x, double y, double roll, List<string> notes = null)
         {
             byte[] correctionReq = CreateCorrectionStoreRequest(pair, x, y, roll, notes);
-            TcpSend(correctionReq, TcpControlStream);
+            TcpSendControl(correctionReq);
         }
 
         internal void StartScanning(uint periodUs, AllDataFormat dataFormat, ulong startTimeNs)
@@ -197,21 +243,25 @@ namespace JoeScan.Pinchot
             idleSkipCount = scanHead.Configuration.IdleScanPeriodUs / periodUs;
 
             byte[] confReq = CreateScanConfigurationRequest(periodUs, dataFormat);
-            TcpSend(confReq, TcpControlStream);
+            TcpSendControl(confReq);
             byte[] startReq = CreateStartScanningRequest(startTimeNs);
-            TcpSend(startReq, TcpControlStream);
+            TcpSendControl(startReq);
+
+            IsScanning = true;
         }
 
         internal void StopScanning()
         {
+            IsScanning = false;
+
             try
             {
-                TcpSend(StopScanningRequest, TcpControlStream);
+                TcpSendControl(StopScanningRequest);
             }
             catch
             {
                 // if the TCP connection was harshly severed then
-                // TcpSend would throw an exception, we should
+                // TcpSendControl would throw an exception, we should
                 // ignore this for two reasons:
                 // 1) the server is most likely dead in this case
                 //    so there is nothing we can do
@@ -222,13 +272,13 @@ namespace JoeScan.Pinchot
 
         internal void KeepAlive()
         {
-            TcpSend(KeepAliveRequest, TcpControlStream);
+            TcpSendControl(KeepAliveRequest);
         }
 
         internal Server::StatusDataT RequestStatus()
         {
-            TcpSend(StatusRequest, TcpControlStream);
-            byte[] buf = TcpRead(TcpControlStream);
+            TcpSendControl(StatusRequest);
+            byte[] buf = TcpReadControl();
 
             var rsp = Server::MessageServerT.DeserializeFromBinary(buf);
             if (rsp.Type != Server.MessageType.STATUS)
@@ -251,8 +301,8 @@ namespace JoeScan.Pinchot
                 }
             }.SerializeToBinary();
 
-            TcpSend(req, TcpControlStream);
-            byte[] buf = TcpRead(TcpControlStream);
+            TcpSendControl(req);
+            byte[] buf = TcpReadControl();
 
             // Don't use object API in order to save memory since these messages are fairly large
             var bb = new FlatBuffers.ByteBuffer(buf);
@@ -277,8 +327,8 @@ namespace JoeScan.Pinchot
                 }
             }.SerializeToBinary();
 
-            TcpSend(req, TcpControlStream);
-            byte[] buf = TcpRead(TcpControlStream);
+            TcpSendControl(req);
+            byte[] buf = TcpReadControl();
 
             var rsp = Server::MessageServerT.DeserializeFromBinary(buf);
             if (rsp.Type != Server.MessageType.PROFILE)
@@ -301,8 +351,8 @@ namespace JoeScan.Pinchot
                 }
             }.SerializeToBinary();
 
-            TcpSend(req, TcpControlStream);
-            byte[] buf = TcpRead(TcpControlStream);
+            TcpSendControl(req);
+            byte[] buf = TcpReadControl();
 
             var rsp = Server::MessageServerT.DeserializeFromBinary(buf);
             if (rsp.Type != Server.MessageType.MAPPLE_DATA)
@@ -314,8 +364,33 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
+        /// Send a TCP message on the <see cref="TcpControlStream"/> with <paramref name="packet"/> as the payload.
+        /// </summary>
+        /// <param name="packet">The data to send.</param>
+        /// <exception cref="IOException">
+        /// Thrown when the TCP message fails to send.
+        /// </exception>
+        internal void TcpSendControl(byte[] packet)
+        {
+            try
+            {
+                TcpSend(packet, TcpControlStream);
+            }
+            catch (Exception e)
+            {
+                Close();
+                throw new IOException($"Scan head {scanHead.SerialNumber} failed to send TCP message, possible network or power issue.", e);
+            }
+        }
+
+        /// <summary>
         /// Send a TCP message to the <paramref name="stream"/> with <paramref name="packet"/> as the payload.
         /// </summary>
+        /// <param name="packet">The data to send.</param>
+        /// <param name="stream">The stream to send the data to.</param>
+        /// <exception cref="IOException">
+        /// Thrown when the TCP message fails to send.
+        /// </exception>
         internal static void TcpSend(byte[] packet, NetworkStream stream)
         {
             // Framing packet
@@ -325,8 +400,30 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
+        /// Receives a TCP message from the <see cref="TcpControlStream"/>.
+        /// </summary>
+        /// <exception cref="IOException">
+        /// Thrown when remote host terminates connection.
+        /// </exception>
+        internal byte[] TcpReadControl()
+        {
+            try
+            {
+                return TcpRead(TcpControlStream);
+            }
+            catch (Exception e)
+            {
+                Close();
+                throw new IOException($"Scan head {scanHead.SerialNumber} failed to read TCP message, possible network or power issue.", e);
+            }
+        }
+
+        /// <summary>
         /// Receives a TCP message from the <paramref name="stream"/>.
         /// </summary>
+        /// <exception cref="IOException">
+        /// Thrown when remote host terminates connection.
+        /// </exception>
         internal static byte[] TcpRead(NetworkStream stream)
         {
             // The server first sends a 4-byte message representing the size of the payload in bytes
@@ -342,7 +439,7 @@ namespace JoeScan.Pinchot
                 int r = stream.Read(frameBuf, curr, frameSize - curr);
                 if (r == 0)
                 {
-                    throw new Exception("Remote host terminated connection.");
+                    throw new IOException("Remote host terminated connection.");
                 }
 
                 curr += r;
@@ -358,7 +455,7 @@ namespace JoeScan.Pinchot
                 int r = stream.Read(buf, curr, dataSize - curr);
                 if (r == 0)
                 {
-                    throw new Exception("Remote host terminated connection.");
+                    throw new IOException("Remote host terminated connection.");
                 }
 
                 curr += r;
@@ -424,48 +521,6 @@ namespace JoeScan.Pinchot
         #endregion
 
         #region Private Methods
-
-        private bool Connect(byte[] connectMsg, TimeSpan timeout)
-        {
-            if (scanHead.IpAddress == null)
-            {
-                return false;
-            }
-
-            var controlResult = tcpControlClient.BeginConnect(scanHead.IpAddress, Globals.ScanServerControlPort, null, null);
-            var dataResult = tcpDataClient.BeginConnect(scanHead.IpAddress, Globals.ScanServerDataPort, null, null);
-
-            foreach (var h in new WaitHandle[] { controlResult.AsyncWaitHandle, dataResult.AsyncWaitHandle })
-            {
-                if (!h.WaitOne(timeout))
-                {
-                    return false;
-                }
-            }
-
-            try
-            {
-                tcpControlClient.EndConnect(controlResult);
-                tcpDataClient.EndConnect(dataResult);
-            }
-            catch (SocketException e)
-            {
-                // TODO: Move the `catch` up higher in the stack
-                throw new InvalidOperationException(
-                    $"Scan head {scanHead.SerialNumber} was discovered but connection was refused. Try rebooting?" +
-                    $"\nSocket error {e.SocketErrorCode}.");
-            }
-
-            TcpSend(connectMsg, TcpControlStream);
-
-            tokenSource = new CancellationTokenSource();
-            token = tokenSource.Token;
-
-            tcpDataReceiveThread = new Thread(TcpDataReceiveLoop) { Priority = ThreadPriority.Highest, IsBackground = true };
-            tcpDataReceiveThread.Start();
-
-            return true;
-        }
 
         private void QueueProfile(Profile profile)
         {
@@ -618,12 +673,10 @@ namespace JoeScan.Pinchot
                     lastTimestamp = dataHeader.TimestampNs;
                 }
             }
-            catch (Exception e)
+            catch (OperationCanceledException) { }
+            catch
             {
-                // TODO: Handle this in a better way
-                // We can either try to reconnect or disconnect
-                // and let the user know something happened.
-                TcpException = e;
+                Close();
             }
         }
 

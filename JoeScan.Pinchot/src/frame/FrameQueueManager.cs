@@ -68,7 +68,12 @@ namespace JoeScan.Pinchot
                 // until we have one with the current sequence number
                 do
                 {
-                    profile = queue.Dequeue();
+                    if (!queue.TryDequeue(out profile))
+                    {
+                        profile = null;
+                        complete = false;
+                        break;
+                    }
                 } while (profile.SequenceNumber < currentSequence);
 
                 dst[i++] = profile;

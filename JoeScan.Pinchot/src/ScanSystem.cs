@@ -75,7 +75,7 @@ namespace JoeScan.Pinchot
         /// <value>
         /// A value indicating whether the scan system is actively scanning.
         /// </value>
-        public bool IsScanning { get; private set; }
+        public bool IsScanning => ScanHeads.Count != 0 && ScanHeads.All(s => s.IsScanning);
 
         /// <summary>
         /// Gets a value indicating whether all <see cref="ScanHeads"/> have established network connection.
@@ -83,7 +83,7 @@ namespace JoeScan.Pinchot
         /// <value>
         /// A value indicating whether all <see cref="ScanHeads"/> have established network connection.
         /// </value>
-        public bool IsConnected => ScanHeads.Any() && ScanHeads.All(s => s.IsConnected);
+        public bool IsConnected => ScanHeads.Count != 0 && ScanHeads.All(s => s.IsConnected);
 
         /// <summary>
         /// Obtains the configuration state of the scan system. If `true`, the system's configuration has
@@ -94,7 +94,7 @@ namespace JoeScan.Pinchot
         /// <value>
         /// A <see cref="bool"/> value indicating whether the scan system is configured (`true`) or not (`false`).
         /// </value>
-        public bool IsConfigured => ScanHeads.Any() && ScanHeads.All(s => !s.IsDirty());
+        public bool IsConfigured => ScanHeads.Count != 0 && ScanHeads.All(s => !s.IsDirty());
 
         /// <summary>
         /// Gets a read-only collection of <see cref="ScanHead"/>s belonging to the scan system.
@@ -292,7 +292,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsScanning"/> is <see langword="true"/>.
         /// -or-<br/>
-        /// <see cref="IsConnected"/> is <see langword="true"/>.
+        /// <see cref="IsConnected"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// A loss of communication with any scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <seealso cref="IsConfigured"/>
         public void PreSendConfiguration()
@@ -468,7 +470,9 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// <see cref="IsScanning"/> is `true`.<br/>
         /// -or-<br/>
-        /// There are duplicate elements from the same scan head in the phase table.
+        /// There are duplicate elements from the same scan head in the phase table.<br/>
+        /// -or-<br/>
+        /// A loss of communication with any scan head occurred, usually caused by a network or power issue.
         /// </exception>
         /// <exception cref="ArgumentOutOfRangeException">
         /// Requested scan period <paramref name="periodUs"/> is invalid.
@@ -500,12 +504,8 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Attempting to stop scanning when not scanning.");
             }
 
-            Parallel.ForEach(ScanHeads, scanHead =>
-            {
-                scanHead.StopScanning();
-            });
+            Parallel.ForEach(ScanHeads, scanHead => scanHead.StopScanning());
 
-            IsScanning = false;
             keepAliveTokenSource.Cancel();
         }
 
@@ -516,7 +516,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is `false`.<br/>
         /// -or-<br/>
-        /// The phase table is empty.
+        /// The phase table is empty.<br/>
+        /// -or-<br/>
+        /// A loss of communication with any scan head occurred, usually caused by a network or power issue.
         /// </exception>
         public uint GetMinScanPeriod()
         {
@@ -578,6 +580,11 @@ namespace JoeScan.Pinchot
         /// <exception cref="OperationCanceledException">
         /// <paramref name="token"/> gets canceled.
         /// </exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if <see cref="ScanHead.IsConnected"/> is <see langword="false"/> for any <see cref="ScanHead"/> when a
+        /// timeout occurs while waiting for a frame. This indicates a loss of communication with the scan head, either
+        /// by a possible network or power issue.
+        /// </exception>
         public IFrame TakeFrame(CancellationToken token = default)
         {
             TryTakeFrame(out var frame, TimeSpan.MaxValue, token);
@@ -603,6 +610,11 @@ namespace JoeScan.Pinchot
         /// otherwise <see langword="false"/> if <paramref name="timeout"/> elapsed or
         /// <paramref name="token"/> was canceled.
         /// </returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if <see cref="ScanHead.IsConnected"/> is <see langword="false"/> for any <see cref="ScanHead"/> when a
+        /// timeout occurs while waiting for a frame. This indicates a loss of communication with the scan head, either
+        /// by a possible network or power issue.
+        /// </exception>
         public bool TryTakeFrame(out IFrame frame, TimeSpan timeout = default, CancellationToken token = default)
         {
             if (!WaitForFrame(timeout, token))
@@ -726,6 +738,17 @@ namespace JoeScan.Pinchot
             ClearPhaseTable();
         }
 
+        internal void StopSystem()
+        {
+            keepAliveTokenSource?.Cancel();
+
+            foreach (var sh in ScanHeads)
+            {
+                try { sh.StopScanning(); } catch { }
+                try { sh.Disconnect(); } catch { }
+            }
+        }
+
         #endregion
 
         #region Private Methods
@@ -773,13 +796,15 @@ namespace JoeScan.Pinchot
 
                 profilesPerFrame = ScanHeads.Sum(sh => sh.QueueManager.NumQueues);
 
-                var hasDuplicatePhaseElements = phaseTable.SelectMany(p => p.Elements)
+                bool hasDuplicatePhaseElements = phaseTable.SelectMany(p => p.Elements)
                                                  .GroupBy(e => new { e.ScanHead.ID, e.LaserPort, e.CameraPort })
                                                  .Any(g => g.Count() > 1);
                 if (hasDuplicatePhaseElements)
                 {
                     throw new InvalidOperationException("Duplicate element in phase table.");
                 }
+
+                currentSequence = 1;
             }
 
             // The API sets the time to start scanning to avoid a rollover bug that
@@ -794,7 +819,6 @@ namespace JoeScan.Pinchot
                 scanHead.StartScanning(periodUs, dataFormat, startScanningTimeNs);
             });
 
-            IsScanning = true;
             keepAliveTokenSource = new CancellationTokenSource();
             keepAliveToken = keepAliveTokenSource.Token;
             Task.Run(KeepAliveLoop, keepAliveToken);
@@ -805,15 +829,21 @@ namespace JoeScan.Pinchot
             var start = DateTime.Now;
             while (!token.IsCancellationRequested)
             {
-                var seedStats = ScanHeads.First().QueueManager.GetStats();
-                long minSeq = seedStats.MinSeq;
-                long maxSize = seedStats.MaxSize;
+                long minSeq = long.MaxValue;
+                long maxSize = long.MinValue;
 
-                foreach (var sh in ScanHeads.Skip(1))
+                foreach (var sh in ScanHeads)
                 {
                     var stats = sh.QueueManager.GetStats();
                     if (minSeq > stats.MinSeq) { minSeq = stats.MinSeq; }
                     if (maxSize < stats.MaxSize) { maxSize = stats.MaxSize; }
+
+                    // if queue is empty, check to see if the scan head is still connected
+                    if (stats.MaxSize == 0 && !sh.IsConnected)
+                    {
+                        StopSystem();
+                        throw new InvalidOperationException($"Scan head {sh.SerialNumber} is not connected, possible network or power error.");
+                    }
                 }
 
                 if (minSeq >= currentSequence || maxSize >= FrameThreshold)
@@ -943,6 +973,7 @@ namespace JoeScan.Pinchot
             }
             phaseTableIsDirty = false;
         }
+
         #endregion
     }
 }

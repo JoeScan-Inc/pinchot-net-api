@@ -38,15 +38,16 @@ namespace JoeScan.Pinchot
             LastSequence = profile.SequenceNumber;
         }
 
-        internal IProfile Dequeue()
+        internal bool TryDequeue(out IProfile profile)
         {
-            return profiles.Take();
+            return profiles.TryTake(out profile);
         }
 
         internal void Clear()
         {
             while (profiles.TryTake(out _)) { }
             QueueOverflowed = false;
+            LastSequence = 0;
         }
     }
 
