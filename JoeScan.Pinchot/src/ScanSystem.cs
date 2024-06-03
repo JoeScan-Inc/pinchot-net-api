@@ -309,7 +309,8 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Can not configure scan system while scanning.");
             }
 
-            if (!IsConfigured)
+            bool sendConfiguration = !IsConfigured;
+            if (sendConfiguration)
             {
                 Parallel.ForEach(ScanHeads, sh =>
                 {
@@ -319,25 +320,22 @@ namespace JoeScan.Pinchot
                         sh.StoreAllAlignments();
                     }
 
-                    if (sh.IsVersionCompatible(16, 1, 0))
+                    if (sh.IsDirty(DirtyStateFlags.ExclusionMask))
                     {
-                        if (sh.IsDirty(DirtyStateFlags.ExclusionMask))
-                        {
-                            sh.SendAllExclusionMasks();
-                        }
-
-                        if (sh.IsDirty(DirtyStateFlags.BrightnessCorrection))
-                        {
-                            sh.SendAllBrightnessCorrections();
-                        }
+                        sh.SendAllExclusionMasks();
                     }
 
-                    sh.ClearDirty();
+                    if (sh.IsDirty(DirtyStateFlags.BrightnessCorrection))
+                    {
+                        sh.SendAllBrightnessCorrections();
+                    }
+
                     sh.RequestStatus();
+                    sh.ClearDirty();
                 });
             }
 
-            if (!IsConfigured || phaseTableIsDirty)
+            if (sendConfiguration || phaseTableIsDirty)
             {
                 UpdateCameraLaserConfigurations();
             }
@@ -532,9 +530,8 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Cannot request minimum scan period without creating a phase table.");
             }
 
-            // user can send scan window after connecting now so we need to check the
-            // scan head to see what the min period is
-            Parallel.ForEach(ScanHeads, sh => sh.RequestStatus());
+            // ensure configuration is sent to scan head so the min scan period is accurate
+            PreSendConfiguration();
 
             uint phaseTableDurationUs = (uint)CalculatePhaseDurations().Sum(d => d);
             uint cameraOffsetUs = (uint)Math.Ceiling(CameraStartEarlyOffsetNs / 1000.0);
@@ -971,6 +968,7 @@ namespace JoeScan.Pinchot
                     scanHead.CameraLaserConfigurations.Add(clc);
                 }
             }
+
             phaseTableIsDirty = false;
         }
 

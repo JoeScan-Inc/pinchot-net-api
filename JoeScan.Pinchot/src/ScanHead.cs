@@ -436,10 +436,10 @@ namespace JoeScan.Pinchot
                     "Invalid maximum exposure time.");
             }
 
-            FlagDirty(DirtyStateFlags.Configuration);
-
             // we make a copy so that we don't share a single configuration between all heads
             Configuration = configuration.Clone() as ScanHeadConfiguration;
+
+            FlagDirty(DirtyStateFlags.Configuration);
         }
 
         /// <summary>
@@ -649,12 +649,6 @@ namespace JoeScan.Pinchot
             }
 
             FlagDirty(DirtyStateFlags.Window);
-
-            if (IsConnected)
-            {
-                SendAllWindows();
-                StoreAllAlignments();
-            }
         }
 
         /// <summary>
@@ -692,12 +686,6 @@ namespace JoeScan.Pinchot
             Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
 
             FlagDirty(DirtyStateFlags.Window);
-
-            if (IsConnected)
-            {
-                SendWindow(pair);
-                StoreAlignment(pair);
-            }
         }
 
         /// <summary>
@@ -737,12 +725,6 @@ namespace JoeScan.Pinchot
             Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
 
             FlagDirty(DirtyStateFlags.Window);
-
-            if (IsConnected)
-            {
-                SendWindow(pair);
-                StoreAlignment(pair);
-            }
         }
 
         /// <summary>
@@ -870,11 +852,6 @@ namespace JoeScan.Pinchot
             ExclusionMasks[pair] = mask.Clone() as ExclusionMask;
 
             FlagDirty(DirtyStateFlags.ExclusionMask);
-
-            if (IsConnected)
-            {
-                SendExclusionMask(pair);
-            }
         }
 
         /// <summary>
@@ -917,11 +894,6 @@ namespace JoeScan.Pinchot
             ExclusionMasks[pair] = mask.Clone() as ExclusionMask;
 
             FlagDirty(DirtyStateFlags.ExclusionMask);
-
-            if (IsConnected)
-            {
-                SendExclusionMask(pair);
-            }
         }
 
         /// <summary>
@@ -1472,11 +1444,6 @@ namespace JoeScan.Pinchot
             Windows[pair] = window.Clone() as ScanWindow;
 
             FlagDirty(DirtyStateFlags.Window);
-
-            if (IsConnected)
-            {
-                SendWindow(pair);
-            }
         }
 
         /// <summary>
@@ -1486,19 +1453,8 @@ namespace JoeScan.Pinchot
         {
             foreach (var pair in CameraLaserPairs)
             {
-                SendWindow(pair);
+                senderReceiver.SendWindow(pair);
             }
-
-            UnflagDirty(DirtyStateFlags.Window);
-        }
-
-        /// <summary>
-        /// Sends the window of the <paramref name="pair"/> passed in
-        /// </summary>
-        internal void SendWindow(CameraLaserPair pair)
-        {
-            senderReceiver.SendWindow(pair);
-            UnflagDirty(DirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -1506,30 +1462,21 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal void StoreAllAlignments()
         {
-            foreach (var pair in CameraLaserPairs)
-            {
-                StoreAlignment(pair);
-            }
-        }
-
-        /// <summary>
-        /// Send the alignment associated with <paramref name="pair"/> to the
-        /// scan head to be stored for diagnostic purposes
-        /// </summary>
-        internal void StoreAlignment(CameraLaserPair pair)
-        {
             if (!IsVersionCompatible(16, 1, 11))
             {
                 return;
             }
 
-            // only send alignment if it has been set
-            if (Alignments.TryGetValue(pair, out var alignment)
-                && alignment.ShiftY != 0
-                && alignment.ShiftX != 0
-                && alignment.Roll != 0)
+            foreach (var pair in CameraLaserPairs)
             {
-                senderReceiver.SendAlignmentStoreData(pair);
+                // only send alignment if it has been set
+                if (Alignments.TryGetValue(pair, out var alignment)
+                    && alignment.ShiftY != 0
+                    && alignment.ShiftX != 0
+                    && alignment.Roll != 0)
+                {
+                    senderReceiver.SendAlignmentStoreData(pair);
+                }
             }
         }
 
@@ -1538,39 +1485,33 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal void SendAllExclusionMasks()
         {
+            if (!IsVersionCompatible(16, 1, 0))
+            {
+                return;
+            }
+
             foreach (var pair in CameraLaserPairs)
             {
-                SendExclusionMask(pair);
+                senderReceiver.SendExclusionMask(pair);
             }
-        }
-
-        /// <summary>
-        /// Sends the exclusion mask of the <paramref name="pair"/> passed in
-        /// </summary>
-        internal void SendExclusionMask(CameraLaserPair pair)
-        {
-            senderReceiver.SendExclusionMask(pair);
-            UnflagDirty(DirtyStateFlags.ExclusionMask);
         }
 
         internal void SendAllBrightnessCorrections()
         {
+            if (!IsVersionCompatible(16, 1, 0))
+            {
+                return;
+            }
+
             foreach (var pair in CameraLaserPairs)
             {
-                SendBrightnessCorrection(pair);
+                senderReceiver.SendBrightnessCorrection(pair);
             }
-        }
-
-        internal void SendBrightnessCorrection(CameraLaserPair pair)
-        {
-            senderReceiver.SendBrightnessCorrection(pair);
-            UnflagDirty(DirtyStateFlags.BrightnessCorrection);
         }
 
         internal void SendMappleCorrection(CameraLaserPair pair, double x, double y, double roll, List<string> notes = null)
         {
             ThrowIfNotVersionCompatible(16, 1, 11);
-
             senderReceiver.SendCorrectionStoreData(pair, x, y, roll, notes);
         }
 
@@ -1854,7 +1795,7 @@ namespace JoeScan.Pinchot
             return Schema.ProductSpecification.GetSpecification(binName);
         }
 
-        private void FlagDirty(DirtyStateFlags dirtyFlag)
+        internal void FlagDirty(DirtyStateFlags dirtyFlag)
         {
             if (dirtyFlag.Equals(DirtyStateFlags.Clean))
             {
@@ -1862,11 +1803,6 @@ namespace JoeScan.Pinchot
             }
 
             dirtyState |= dirtyFlag;
-        }
-
-        private void UnflagDirty(DirtyStateFlags flagToRemove)
-        {
-            dirtyState &= ~flagToRemove;
         }
 
         internal void ClearDirty()

@@ -3,7 +3,7 @@
 namespace JoeScan.Pinchot.Beta
 {
     /// <summary>
-    /// Beta functionality for a scan head. These functions are for premilinary testing
+    /// Beta functionality for a scan head. These functions are for preliminary testing
     /// and should be used with the expectation that the signature might change in a
     /// future revision.
     /// </summary>
@@ -67,10 +67,7 @@ namespace JoeScan.Pinchot.Beta
             var pair = scanHead.GetPair(camera);
             scanHead.BrightnessCorrections[pair] = correction.Clone() as BrightnessCorrection;
 
-            if (scanHead.IsConnected)
-            {
-                scanHead.SendBrightnessCorrection(pair);
-            }
+            scanHead.FlagDirty(DirtyStateFlags.BrightnessCorrection);
         }
 
         /// <summary>
@@ -119,10 +116,7 @@ namespace JoeScan.Pinchot.Beta
             var pair = scanHead.GetPair(laser);
             scanHead.BrightnessCorrections[pair] = correction.Clone() as BrightnessCorrection;
 
-            if (scanHead.IsConnected)
-            {
-                scanHead.SendBrightnessCorrection(pair);
-            }
+            scanHead.FlagDirty(DirtyStateFlags.BrightnessCorrection);
         }
     }
 }

@@ -3,6 +3,7 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
+using System;
 using System.Collections.Generic;
 using Client = joescan.schema.client;
 using Server = joescan.schema.server;
@@ -95,7 +96,7 @@ namespace JoeScan.Pinchot
         /// is incompatible with the client API</exception>"
         internal ScanHeadStatus(Server::StatusDataT data, Client::ScanHeadSpecificationT spec)
         {
-            MinScanPeriodUs = data.MinScanPeriodNs / 1000;
+            MinScanPeriodUs = (uint)Math.Ceiling(data.MinScanPeriodNs / 1000.0);
             GlobalTimeNs = data.GlobalTimeNs;
             NumPacketsSent = data.NumPacketsSent;
             ProfilesSentCount = data.NumProfilesSent;
