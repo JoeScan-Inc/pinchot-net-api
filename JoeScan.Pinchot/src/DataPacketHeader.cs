@@ -1,4 +1,4 @@
-﻿// Copyright(c) JoeScan Inc. All Rights Reserved.
+// Copyright(c) JoeScan Inc. All Rights Reserved.
 //
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
@@ -16,7 +16,7 @@ namespace JoeScan.Pinchot
         internal int payloadsize;
     }
 
-    internal class DataPacketHeader
+    internal struct DataPacketHeader
     {
         internal ushort Magic { get; }
         internal ushort ExposureTimeUs { get; }
@@ -34,12 +34,14 @@ namespace JoeScan.Pinchot
         internal ushort StartColumn { get; }
         internal ushort EndColumn { get; }
         internal uint SequenceNumber { get; }
-        internal Dictionary<Encoder, long> Encoders { get; }
-        internal Dictionary<DataType, FragmentLayout> FragmentLayouts { get; }
+        internal long[] Encoders { get; }
+        internal FragmentLayout[] FragmentLayouts { get; }
 
         internal int Source => ScanHeadId << 3 | (byte)CameraPort << 2 | (byte)LaserPort;
 
         internal int Length { get; }
+
+        internal long MainEncoder => Encoders.Length > (int)Encoder.Main ? Encoders[(int)Encoder.Main] : 0;
 
         internal DataPacketHeader(Span<byte> buf)
         {
@@ -61,6 +63,8 @@ namespace JoeScan.Pinchot
             StartColumn = NetworkByteUnpacker.ExtractUShort(buf, ref idx);
             EndColumn = NetworkByteUnpacker.ExtractUShort(buf, ref idx);
             SequenceNumber = NetworkByteUnpacker.ExtractUInt(buf, ref idx);
+            Encoders = new long[(int)(Encoder.Auxiliary2)];
+            FragmentLayouts = new FragmentLayout[(int)(DataType.Image)];
 
             int numContentTypes = DataType.BitsSet();
             ushort[] steps = new ushort[numContentTypes];
@@ -69,16 +73,13 @@ namespace JoeScan.Pinchot
                 steps[i] = NetworkByteUnpacker.ExtractUShort(buf, ref idx);
             }
 
-            Encoders = new Dictionary<Encoder, long>(NumberEncoders);
             for (int i = 0; i < NumberEncoders; ++i)
             {
-                Encoder e = Encoder.Main + i;
-                Encoders[e] = NetworkByteUnpacker.ExtractLong(buf, ref idx);
+                Encoders[i] = NetworkByteUnpacker.ExtractLong(buf, ref idx);
             }
 
             int stepOffset = 0;
             int numCols = EndColumn - StartColumn + 1;
-            FragmentLayouts = new Dictionary<DataType, FragmentLayout>(numContentTypes);
             foreach (var dt in DataType.GetFlags())
             {
                 ushort step = steps[stepOffset++];
@@ -101,7 +102,7 @@ namespace JoeScan.Pinchot
                 };
 
                 idx += payloadsize;
-                FragmentLayouts[dt] = fl;
+                FragmentLayouts[(int)dt] = fl;
             }
 
             Length = idx;

@@ -1,4 +1,4 @@
-﻿// Copyright(c) JoeScan Inc. All Rights Reserved.
+// Copyright(c) JoeScan Inc. All Rights Reserved.
 //
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
@@ -40,7 +40,7 @@ namespace JoeScan.Pinchot
         private DirtyStateFlags dirtyState;
         private ScanningMode mode;
 
-        #endregion
+        #endregion Private Fields
 
         #region Public Properties
 
@@ -189,7 +189,7 @@ namespace JoeScan.Pinchot
             }
         }
 
-        #endregion
+        #endregion Public Properties
 
         #region Internal Properties
 
@@ -278,7 +278,7 @@ namespace JoeScan.Pinchot
             }
         }
 
-        #endregion
+        #endregion Internal Properties
 
         #region Lifecycle
 
@@ -355,7 +355,7 @@ namespace JoeScan.Pinchot
             disposed = true;
         }
 
-        #endregion
+        #endregion Lifecycle
 
         #region Public Methods
 
@@ -554,6 +554,16 @@ namespace JoeScan.Pinchot
             }
 
             return success;
+        }
+
+        /// <summary>
+        /// Tries to take an <see cref="IProfile"/> from the queue.
+        /// </summary>
+        /// <param name="profile">The dequeued <see cref="IProfile"/>.</param>
+        /// <returns>Whether a <see cref="IProfile"/> was successfully taken.</returns>
+        public bool TryTakeNextProfile(out IProfile profile)
+        {
+            return Profiles.TryTake(out profile);
         }
 
         /// <summary>
@@ -1259,7 +1269,7 @@ namespace JoeScan.Pinchot
             return CachedStatus;
         }
 
-        #endregion
+        #endregion Public Methods
 
         #region Internal Methods
 
@@ -1758,7 +1768,8 @@ namespace JoeScan.Pinchot
         {
             return dirtyState.HasFlag(flag);
         }
-        #endregion
+
+        #endregion Internal Methods
 
         #region Private Methods
 
@@ -1770,24 +1781,31 @@ namespace JoeScan.Pinchot
                 case ProductType.JS50WSC:
                     binName = "js50wsc.bin";
                     break;
+
                 case ProductType.JS50WX:
                     binName = "js50wx.bin";
                     break;
+
                 case ProductType.JS50X6B20:
                     binName = "js50x6b20.bin";
                     break;
+
                 case ProductType.JS50X6B30:
                     binName = "js50x6b30.bin";
                     break;
+
                 case ProductType.JS50MX:
                     binName = "js50mx.bin";
                     break;
+
                 case ProductType.JS50Z820:
                     binName = "js50z820.bin";
                     break;
+
                 case ProductType.JS50Z830:
                     binName = "js50z830.bin";
                     break;
+
                 default:
                     throw new ArgumentException($"Invalid product type: {type}.", nameof(type));
             }
@@ -1810,6 +1828,6 @@ namespace JoeScan.Pinchot
             dirtyState = DirtyStateFlags.Clean;
         }
 
-        #endregion
+        #endregion Private Methods
     }
 }

@@ -1,9 +1,10 @@
-﻿// Copyright(c) JoeScan Inc. All Rights Reserved.
+// Copyright(c) JoeScan Inc. All Rights Reserved.
 //
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
 using System;
+using System.Collections.Generic;
 
 namespace JoeScan.Pinchot
 {
@@ -18,7 +19,7 @@ namespace JoeScan.Pinchot
         private int rawPointsArrayIndex;
         private AlignmentParameters alignment;
 
-        #endregion
+        #endregion Private Fields
 
         #region Lifecycle
 
@@ -31,9 +32,9 @@ namespace JoeScan.Pinchot
             rawPointsArrayIndex = 0;
         }
 
-        #endregion
+        #endregion Lifecycle
 
-        internal Profile CreateNewProfile(DataPacketHeader header)
+        internal Profile CreateNewProfile(ref DataPacketHeader header)
         {
             var spec = scanHead.Specification;
             var p = new Profile
@@ -48,9 +49,13 @@ namespace JoeScan.Pinchot
                 ExposureTimeUs = header.ExposureTimeUs,
                 SequenceNumber = header.SequenceNumber,
                 PacketsExpected = header.NumberDatagrams,
-                EncoderValues = header.Encoders,
+                EncoderValues = new Dictionary<Encoder, long>(),
                 AllDataFormat = dataFormat,
             };
+            for (var e = 0; e < header.Encoders.Length; e++)
+            {
+                p.EncoderValues[(Encoder)e] = header.Encoders[e];
+            }
 
             if (header.DataType.HasFlag(DataType.Subpixel))
             {
@@ -77,7 +82,7 @@ namespace JoeScan.Pinchot
             return p;
         }
 
-        internal bool ProcessPacket(Profile profile, DataPacketHeader header, Span<byte> packet)
+        internal bool ProcessPacket(Profile profile, ref DataPacketHeader header, Span<byte> packet)
         {
             var dataTypes = header.DataType;
             ushort startCol = header.StartColumn;
@@ -94,11 +99,11 @@ namespace JoeScan.Pinchot
                 bool hasBrightness = dataTypes.HasFlag(DataType.Brightness);
                 if (hasBrightness)
                 {
-                    var bLayout = header.FragmentLayouts[DataType.Brightness];
+                    var bLayout = header.FragmentLayouts[(int)DataType.Brightness];
                     bSrc = bLayout.offset;
                 }
 
-                var xyLayout = header.FragmentLayouts[DataType.XY];
+                var xyLayout = header.FragmentLayouts[(int)DataType.XY];
                 int xySrc = xyLayout.offset;
 
                 // assume step and number of values is same for brightness and XY layout
@@ -133,9 +138,9 @@ namespace JoeScan.Pinchot
             }
             else if (dataTypes.HasFlag(DataType.Subpixel))
             {
-                var spLayout = header.FragmentLayouts[DataType.Subpixel];
+                var spLayout = header.FragmentLayouts[(int)DataType.Subpixel];
                 int spSrc = spLayout.offset;
-                var bLayout = header.FragmentLayouts[DataType.Brightness];
+                var bLayout = header.FragmentLayouts[(int)DataType.Brightness];
                 int bSrc = bLayout.offset;
 
                 int numVals = spLayout.numVals;
