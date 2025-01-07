@@ -67,7 +67,7 @@ namespace JoeScan.Pinchot.Beta
             var pair = scanHead.GetPair(camera);
             scanHead.BrightnessCorrections[pair] = correction.Clone() as BrightnessCorrection;
 
-            scanHead.FlagDirty(DirtyStateFlags.BrightnessCorrection);
+            scanHead.FlagDirty(ScanHeadDirtyStateFlags.BrightnessCorrection);
         }
 
         /// <summary>
@@ -116,7 +116,7 @@ namespace JoeScan.Pinchot.Beta
             var pair = scanHead.GetPair(laser);
             scanHead.BrightnessCorrections[pair] = correction.Clone() as BrightnessCorrection;
 
-            scanHead.FlagDirty(DirtyStateFlags.BrightnessCorrection);
+            scanHead.FlagDirty(ScanHeadDirtyStateFlags.BrightnessCorrection);
         }
     }
 }

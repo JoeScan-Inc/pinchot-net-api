@@ -59,6 +59,12 @@ namespace JoeScan.Pinchot
         /// JS-50 Z830
         /// </summary>
         [Description("JS-50 Z8 (30°)")]
-        JS50Z830 = ScanHeadType.JS50Z830
+        JS50Z830 = ScanHeadType.JS50Z830,
+
+        /// <summary>
+        /// JS-50 Phaser
+        /// </summary>
+        [Description("JS-50 Phaser")]
+        JS50Phaser = ScanHeadType.JS50PHASER,
     }
 }

@@ -16,7 +16,7 @@ using Server = joescan.schema.server;
 
 namespace JoeScan.Pinchot
 {
-    internal class ScanHeadSenderReceiver : IDisposable
+    internal partial class ScanHeadSenderReceiver : IDisposable
     {
         #region Private Fields
 
@@ -38,8 +38,10 @@ namespace JoeScan.Pinchot
         private uint idleSkipCount;
         private long lastEncoderCount;
         private uint currentSkipCount;
+        private ScanningMode mode;
 
         private bool disposed;
+        private static readonly object tcp_send_lock = new object();
 
         private readonly byte[] StopScanningRequest = new Client::MessageClientT() { Type = Client::MessageType.SCAN_STOP }.SerializeToBinary();
         private readonly byte[] DisconnectRequest = new Client::MessageClientT() { Type = Client::MessageType.DISCONNECT }.SerializeToBinary();
@@ -61,8 +63,6 @@ namespace JoeScan.Pinchot
         internal long IncompleteProfilesReceivedCount { get; private set; }
 
         internal long BadPacketsCount { get; private set; }
-
-        internal ScanningMode Mode { get; set; }
 
         #endregion
 
@@ -207,7 +207,7 @@ namespace JoeScan.Pinchot
 
         internal void SendWindow(CameraLaserPair pair)
         {
-            byte[] windowReq = CreateWindowRectangularRequest(pair);
+            byte[] windowReq = CreateWindowConfigurationRequest(pair);
             TcpSendControl(windowReq);
         }
 
@@ -235,16 +235,36 @@ namespace JoeScan.Pinchot
             TcpSendControl(correctionReq);
         }
 
-        internal void StartScanning(uint periodUs, AllDataFormat dataFormat, ulong startTimeNs)
+        internal void SendScanSyncConfiguration(Dictionary<Encoder, uint> mapping)
+        {
+            byte[] mappingReq = CreateScanSyncConfiguartionRequest(mapping);
+            TcpSend(mappingReq, TcpControlStream);
+        }
+
+        internal void StartScanning(StartScanningOptions opts)
         {
             ProfileBufferOverflowed = false;
 
-            profileAssembler = new ProfileAssembler(scanHead, dataFormat);
-            idleSkipCount = scanHead.Configuration.IdleScanPeriodUs / periodUs;
+            if (scanHead is Phaser)
+            {
+                opts.Format = DataFormat.XYBrightnessQuarter;
+            }
 
-            byte[] confReq = CreateScanConfigurationRequest(periodUs, dataFormat);
+            profileAssembler = new ProfileAssembler(scanHead, opts.AllFormat);
+            idleSkipCount = scanHead.Configuration.IdleScanPeriodUs / opts.PeriodUs;
+            mode = opts.Mode;
+
+            // TODO: The phaser configuration request must come before
+            // the scan configuration request, this should be fixed
+            if (scanHead is Phaser)
+            {
+                byte[] phaserReq = CreatePhaserConfigurationRequest();
+                TcpSendControl(phaserReq);
+            }
+
+            byte[] confReq = CreateScanConfigurationRequest(opts);
             TcpSendControl(confReq);
-            byte[] startReq = CreateStartScanningRequest(startTimeNs);
+            byte[] startReq = CreateStartScanningRequest(opts.StartScanningTimeNs);
             TcpSendControl(startReq);
 
             IsScanning = true;
@@ -393,10 +413,16 @@ namespace JoeScan.Pinchot
         /// </exception>
         internal static void TcpSend(byte[] packet, NetworkStream stream)
         {
-            // Framing packet
-            stream.Write(BitConverter.GetBytes(packet.Length), 0, sizeof(int));
-            // Payload
-            stream.Write(packet, 0, packet.Length);
+            // we need to lock to ensure that the framing packet and the
+            // payload are sent together because multiple threads could
+            // be sending commands at the same time (keep alive, async ops, etc)
+            lock (tcp_send_lock)
+            {
+                // Framing packet
+                stream.Write(BitConverter.GetBytes(packet.Length), 0, sizeof(int));
+                // Payload
+                stream.Write(packet, 0, packet.Length);
+            }
         }
 
         /// <summary>
@@ -548,8 +574,8 @@ namespace JoeScan.Pinchot
                 }
             }
 
-            // TODO: unify profile and frame queueing
-            if (Mode == ScanningMode.Profile)
+            // TODO: unify profile and frame queueing (this should also move `mode` into ScanHead)
+            if (mode == ScanningMode.Profile)
             {
                 var profiles = scanHead.Profiles;
                 if (!profiles.TryAdd(profile))
@@ -559,13 +585,13 @@ namespace JoeScan.Pinchot
                     profiles.TryAdd(profile);
                 }
             }
-            else if (Mode == ScanningMode.Frame)
+            else if (mode == ScanningMode.Frame)
             {
                 scanHead.QueueManager.EnqueueProfile(profile);
             }
             else
             {
-                throw new InvalidOperationException($"Unhandled queueing strategy for {Mode}");
+                throw new InvalidOperationException($"Unhandled queueing strategy for {mode}");
             }
         }
 
@@ -680,13 +706,13 @@ namespace JoeScan.Pinchot
             }
         }
 
-        private byte[] CreateWindowRectangularRequest(CameraLaserPair pair)
+        private byte[] CreateWindowConfigurationRequest(CameraLaserPair pair)
         {
             var constraints = new List<Client::ConstraintT>();
             var window = scanHead.Windows[pair];
             var alignment = scanHead.Alignments[pair];
 
-            foreach (var (wc0, wc1) in window.WindowConstraints)
+            foreach (var (wc0, wc1) in window.Constraints)
             {
                 var p0Prime = alignment.MillToCamera(wc0.X, wc0.Y, 0);
                 var p1Prime = alignment.MillToCamera(wc1.X, wc1.Y, 0);
@@ -763,9 +789,10 @@ namespace JoeScan.Pinchot
             return message.SerializeToBinary();
         }
 
-        private byte[] CreateScanConfigurationRequest(uint periodUs, AllDataFormat dataFormat)
+        private byte[] CreateScanConfigurationRequest(StartScanningOptions opts)
         {
             var conf = scanHead.Configuration;
+
             var message = new Client::MessageClientT()
             {
                 Type = Client::MessageType.SCAN_CONFIGURATION,
@@ -775,12 +802,14 @@ namespace JoeScan.Pinchot
                     Value = new Client::ScanConfigurationDataT()
                     {
                         CameraLaserConfigurations = scanHead.CameraLaserConfigurations,
-                        DataStride = ResolutionPresets.GetStep(dataFormat),
-                        DataTypeMask = (uint)ResolutionPresets.GetDataType(dataFormat),
+                        DataStride = ResolutionPresets.GetStep(opts.AllFormat),
+                        DataTypeMask = (uint)ResolutionPresets.GetDataType(opts.AllFormat),
                         LaserDetectionThreshold = conf.LaserDetectionThreshold,
                         SaturationPercent = conf.SaturationPercentage,
                         SaturationThreshold = conf.SaturationThreshold,
-                        ScanPeriodNs = periodUs * 1000
+                        ScanPeriodNs = opts.PeriodUs * 1000,
+                        IdleScanEnabled = opts.IdlePeriodUs != null,
+                        IdleScanPeriodNs = (opts.IdlePeriodUs ?? 0) * 1000,
                     }
                 }
             };
@@ -877,6 +906,30 @@ namespace JoeScan.Pinchot
                                 Roll = roll
                             }
                         }
+                    }
+                }
+            };
+
+            return message.SerializeToBinary();
+        }
+
+        private static byte[] CreateScanSyncConfiguartionRequest(Dictionary<Encoder, uint> mapping)
+        {
+            uint mainSerial = mapping.TryGetValue(Encoder.Main, out uint m) ? m : 0;
+            uint aux1Serial = mapping.TryGetValue(Encoder.Auxiliary1, out uint a1) ? a1 : 0;
+            uint aux2Serial = mapping.TryGetValue(Encoder.Auxiliary2, out uint a2) ? a2 : 0;
+
+            var message = new Client::MessageClientT
+            {
+                Type = Client.MessageType.SCANSYNC_CONFIGURATION,
+                Data = new Client::MessageDataUnion
+                {
+                    Type = Client.MessageData.ScanSyncConfigurationData,
+                    Value = new Client::ScanSyncConfigurationDataT
+                    {
+                        SerialMain = mainSerial,
+                        SerialAux1 = aux1Serial,
+                        SerialAux2 = aux2Serial,
                     }
                 }
             };

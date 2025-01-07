@@ -159,6 +159,7 @@ namespace JoeScan.Pinchot
             return PerformRestGetRequest<RestMapping>("mapping");
         }
 
+        [Obsolete("No longer suggested. Use GetIntrinsicCorrectionShift.")]
         internal RestMappleCorrectionShift GetMappleCorrectionShift()
         {
             return PerformRestGetRequest<RestMappleCorrectionShift>("config/mapple-correct-shift-down");
@@ -169,6 +170,7 @@ namespace JoeScan.Pinchot
             PerformRestPostRequest("config/exposure-times", new { cameraStart, cameraEnd, laserStart, laserEnd });
         }
 
+        [Obsolete("No longer suggested. Use SetIntrinsicCorrectionShift.")]
         internal void SetMappleCorrectionShift(bool enabled)
         {
             PerformRestPostRequest("config/mapple-correct-shift-down", new { enabled });
@@ -190,6 +192,21 @@ namespace JoeScan.Pinchot
             {
                 PerformRestPostRequest("files/defect", map);
             }
+        }
+
+        internal RestEnclustraInfo GetEnclustraInfo()
+        {
+            return PerformRestGetRequest<RestEnclustraInfo>("soc/eeprom");
+        }
+
+        internal void PowerLasers(IEnumerable<uint> laserPorts, uint dutyPercent, uint periodNs)
+        {
+            PerformRestPostRequest("config/laser-pwm", new RestLaserPower(periodNs, laserPorts, dutyPercent));
+        }
+
+        internal void SchedulerOverride(bool enabled)
+        {
+            PerformRestPostRequest("config/scheduler-override", new { enable_scheduler = enabled });
         }
     }
 }

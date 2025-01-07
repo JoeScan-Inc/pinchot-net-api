@@ -84,20 +84,22 @@ namespace JoeScan.Pinchot
 
         internal FrameQueueStats GetStats()
         {
-            var seedQueue = Queues.First().Value;
+            uint minSeq = uint.MaxValue;
+            uint maxSeq = 0;
+            int minSize = int.MaxValue;
+            int maxSize = 0;
 
-            long minSeq = seedQueue.LastSequence;
-            long maxSeq = minSeq;
-            long minSize = seedQueue.Count;
-            long maxSize = minSize;
-
-            foreach (var queue in Queues.Skip(1).Select(f => f.Value))
+            foreach (var kvp in Queues)
             {
-                uint seq = queue.LastSequence;
-                int size = queue.Count;
+                var queue = kvp.Value;
 
-                if (minSeq > seq) { minSeq = seq; }
-                if (maxSeq < seq) { maxSeq = seq; }
+                uint firstSeq = queue.FirstSequence;
+                if (minSeq > firstSeq) { minSeq = firstSeq; }
+
+                uint lastSeq = queue.LastSequence;
+                if (maxSeq < lastSeq) { maxSeq = lastSeq; }
+
+                int size = queue.Count;
                 if (minSize > size) { minSize = size; }
                 if (maxSize < size) { maxSize = size; }
             }

@@ -8,6 +8,6 @@
 
 using System.Reflection;
 
-[assembly: AssemblyFileVersion("16.2.6.0")]
-[assembly: AssemblyVersion("16.2.6.0")]
-[assembly: AssemblyInformationalVersion("16.2.6+bee016e")]
+[assembly: AssemblyFileVersion("16.3.0.1295")]
+[assembly: AssemblyVersion("16.3.0.1295")]
+[assembly: AssemblyInformationalVersion("16.3.0-0000-js-phaser.1+9f820b3")]

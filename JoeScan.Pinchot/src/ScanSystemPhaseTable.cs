@@ -12,7 +12,7 @@ namespace JoeScan.Pinchot
     /// <summary>
     /// An entry in a phase within a phase table.
     /// </summary>
-    internal class PhaseElement
+    internal partial class PhaseElement
     {
         internal ScanHead ScanHead;
         internal uint CameraPort;
@@ -30,7 +30,7 @@ namespace JoeScan.Pinchot
     /// A phase within a phase table. Contains all the <see cref="PhaseElement"/>s
     /// that should finish exposing at the same time.
     /// </summary>
-    internal class Phase
+    internal partial class Phase
     {
         internal List<PhaseElement> Elements { get; } = new List<PhaseElement>();
 
@@ -65,8 +65,6 @@ namespace JoeScan.Pinchot
     {
         private readonly List<Phase> phaseTable = new List<Phase>();
 
-        private bool phaseTableIsDirty = true;
-
         internal int NumberOfPhases => phaseTable.Count;
 
         /// <summary>
@@ -74,8 +72,8 @@ namespace JoeScan.Pinchot
         /// </summary>
         public void ClearPhaseTable()
         {
-            phaseTableIsDirty = true;
             phaseTable.Clear();
+            FlagDirty(ScanSystemDirtyStateFlags.PhaseTable);
         }
 
         /// <summary>
@@ -85,8 +83,8 @@ namespace JoeScan.Pinchot
         /// </summary>
         public void AddPhase()
         {
-            phaseTableIsDirty = true;
             phaseTable.Add(new Phase());
+            FlagDirty(ScanSystemDirtyStateFlags.PhaseTable);
         }
 
         /// <summary>
@@ -244,7 +242,7 @@ namespace JoeScan.Pinchot
 
             var phase = phaseTable.Last();
             phase.AddElement(scanHead, pair, configuration);
-            phaseTableIsDirty = true;
+            FlagDirty(ScanSystemDirtyStateFlags.PhaseTable);
         }
 
         /// <summary>
@@ -256,19 +254,26 @@ namespace JoeScan.Pinchot
         {
             // Initialize phase durations to the element with the largest max laser on time
             var durations = new List<uint>();
+            bool firstPhase = true;
             foreach (var phase in phaseTable)
             {
-                uint duration = 0;
+                uint durationNs = 0;
                 foreach (var element in phase.Elements)
                 {
-                    uint maxOnTimeUs = element.MaxLaserOnTimeUs;
-                    if (maxOnTimeUs > duration)
+                    uint maxOnTimeNs = element.IsStrobe
+                        ? element.StrobeDurationNs
+                        // account for the camera early start offset in the first
+                        // phase so they aren't scheduled before the server tick
+                        : (element.MaxLaserOnTimeUs * 1000) + (firstPhase ? CameraStartEarlyOffsetNs : 0);
+
+                    if (maxOnTimeNs > durationNs)
                     {
-                        duration = maxOnTimeUs;
+                        durationNs = maxOnTimeNs;
                     }
                 }
 
-                durations.Add(duration);
+                durations.Add(durationNs);
+                firstPhase = false;
             }
 
             // Calculate the frame overhead time to check for violations. The start of a given camera's
@@ -276,7 +281,7 @@ namespace JoeScan.Pinchot
             const uint RowTimeNs = 3210;
             const uint OverheadRows = 42;
             const uint safetyMarginRows = 3;
-            uint frameOverheadTimeUs = (uint)Math.Ceiling(RowTimeNs * (4 + OverheadRows + safetyMarginRows) / 1000.0);
+            uint frameOverheadTimeNs = RowTimeNs * (4 + OverheadRows + safetyMarginRows);
 
             // Accumulator that tracks the duration between exposures for a scan head/camera port pair
             var accum = new Dictionary<Tuple<ScanHead, uint>, uint>();
@@ -304,22 +309,23 @@ namespace JoeScan.Pinchot
                         var sh = element.ScanHead;
                         var shCamera = new Tuple<ScanHead, uint>(sh, element.CameraPort);
 
-                        // Check for violations
-                        if (accum.ContainsKey(shCamera))
+                        // Check for violations, but skip strobes since they
+                        // don't have the same timing requirements
+                        if (accum.ContainsKey(shCamera) && !element.IsStrobe)
                         {
                             // How long it has been since the end of the camera's last exposure
-                            uint lastSeenUs = accum[shCamera];
+                            uint lastSeenNs = accum[shCamera];
 
                             // Minimum scan period violation
-                            uint minScanPeriodUs = sh.MinScanPeriod();
-                            int minPeriodAdjUs = (int)(minScanPeriodUs - lastSeenUs);
+                            uint minScanPeriodNs = sh.MinScanPeriod() * 1000;
+                            int minPeriodAdjNs = (int)(minScanPeriodNs - lastSeenNs);
 
                             // Frame overhead time violation
-                            uint maxLaserOnUs = element.MaxLaserOnTimeUs;
-                            int fotAdjUs = (int)(frameOverheadTimeUs - (lastSeenUs - maxLaserOnUs));
+                            uint maxLaserOnNs = element.MaxLaserOnTimeUs * 1000;
+                            int fotAdjNs = (int)(frameOverheadTimeNs - (lastSeenNs - maxLaserOnNs));
 
                             // Adjust the durations if any violation occured
-                            int adj = Math.Max(minPeriodAdjUs, fotAdjUs);
+                            int adj = Math.Max(minPeriodAdjNs, fotAdjNs);
                             if (adj > 0)
                             {
                                 durations[phaseNumber] += (uint)adj;
@@ -345,21 +351,19 @@ namespace JoeScan.Pinchot
             }
 
             // Get the element count of the scan head with the most elements in the table
-            int maxElements = ScanHeads.Max(sh => phaseTable.SelectMany(p => p.Elements.Where(e => e.ScanHead == sh)).Count());
+            int maxElements = ScanHeads.Max(sh => phaseTable.SelectMany(p => p.Elements.Where(e => e.ScanHead == sh && !e.IsStrobe)).Count());
 
             // Use the max element count to get the minimum allowed duration of the phase table
-            int minDuration = Globals.MinScanPeriodPerElementUs * maxElements;
+            int minDurationNs = Globals.MinScanPeriodPerElementUs * maxElements * 1000;
 
-            // Find the calculated scan period (phase table duration + camera adjustment)
-            int phaseDuration = (int)durations.Sum(d => d);
-            int cameraOffset = (int)Math.Ceiling(CameraStartEarlyOffsetNs / 1000.0);
-            int totalDuration = phaseDuration + cameraOffset;
+            // Find the calculated scan period
+            int totalDurationNs = (int)durations.Sum(d => d);
 
             // If needed, correct durations for maximum throughput violation
             // by distributing the time delta equally across all phases
-            if (totalDuration < minDuration)
+            if (totalDurationNs < minDurationNs)
             {
-                int diff = minDuration - totalDuration;
+                int diff = minDurationNs - totalDurationNs;
                 int size = durations.Count;
                 int offset = (diff + size - 1) / size; // division + ceiling
 

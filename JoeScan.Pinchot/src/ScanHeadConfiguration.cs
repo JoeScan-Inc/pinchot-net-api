@@ -167,6 +167,7 @@ namespace JoeScan.Pinchot
         /// The minimum number of encoder counts between profiles needed to keep the
         /// scan head out of an idle state.
         /// </value>
+        [Obsolete("Use ScanSystem.StartScanning(StartScanningOptions) to specify idle scan period instead.")]
         public uint MinimumEncoderTravel { get; set; }
 
         /// <summary>
@@ -176,6 +177,7 @@ namespace JoeScan.Pinchot
         /// <value>
         /// The scan period in microseconds of a scan head in an idle state.
         /// </value>
+        [Obsolete("Use ScanSystem.StartScanning(StartScanningOptions) to specify idle scan period instead.")]
         public uint IdleScanPeriodUs { get; set; }
 
         #endregion

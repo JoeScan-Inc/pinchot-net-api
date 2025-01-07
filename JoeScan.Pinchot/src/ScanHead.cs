@@ -37,8 +37,7 @@ namespace JoeScan.Pinchot
         private bool disposed;
         private ProductType type;
         private ScanHeadOrientation orientation;
-        private DirtyStateFlags dirtyState;
-        private ScanningMode mode;
+        private ScanHeadDirtyStateFlags dirtyState;
 
         #endregion
 
@@ -128,7 +127,7 @@ namespace JoeScan.Pinchot
                     alignment.Value.Orientation = value;
                 }
 
-                FlagDirty(DirtyStateFlags.Window);
+                FlagDirty(ScanHeadDirtyStateFlags.Window);
             }
         }
 
@@ -209,20 +208,6 @@ namespace JoeScan.Pinchot
             = new ScanHeadConfiguration();
 
         /// <summary>
-        /// Gets or sets the <see cref="ScanningMode"/> that the scan head should operate in
-        /// when <see cref="StartScanning(uint, AllDataFormat, ulong)"/> is called.
-        /// </summary>
-        internal ScanningMode Mode
-        {
-            get => mode;
-            set
-            {
-                mode = value;
-                senderReceiver.Mode = value;
-            }
-        }
-
-        /// <summary>
         /// Gets the thread safe collection of profiles received from the scan head.
         /// </summary>
         internal BlockingCollection<IProfile> Profiles { get; }
@@ -278,6 +263,13 @@ namespace JoeScan.Pinchot
             }
         }
 
+        internal bool IsLaserDriven =>
+            Specification.ConfigurationGroupPrimary == Client::ConfigurationGroupPrimary.LASER;
+
+        internal bool IsCameraDriven =>
+            Specification.ConfigurationGroupPrimary == Client::ConfigurationGroupPrimary.CAMERA;
+
+
         #endregion
 
         #region Lifecycle
@@ -315,15 +307,7 @@ namespace JoeScan.Pinchot
                 BrightnessCorrections[pair] = new BrightnessCorrection(this);
             }
 
-            dirtyState = DirtyStateFlags.AllDirty;
-        }
-
-        /// <summary>
-        /// The scan head finalizer.
-        /// </summary>
-        ~ScanHead()
-        {
-            Dispose(false);
+            FlagDirty(ScanHeadDirtyStateFlags.AllDirty);
         }
 
         /// <summary>
@@ -439,7 +423,7 @@ namespace JoeScan.Pinchot
             // we make a copy so that we don't share a single configuration between all heads
             Configuration = configuration.Clone() as ScanHeadConfiguration;
 
-            FlagDirty(DirtyStateFlags.Configuration);
+            FlagDirty(ScanHeadDirtyStateFlags.Configuration);
         }
 
         /// <summary>
@@ -648,7 +632,7 @@ namespace JoeScan.Pinchot
                 Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
             }
 
-            FlagDirty(DirtyStateFlags.Window);
+            FlagDirty(ScanHeadDirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -685,7 +669,7 @@ namespace JoeScan.Pinchot
             var pair = GetPair(camera);
             Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
 
-            FlagDirty(DirtyStateFlags.Window);
+            FlagDirty(ScanHeadDirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -724,7 +708,7 @@ namespace JoeScan.Pinchot
             var pair = GetPair(laser);
             Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
 
-            FlagDirty(DirtyStateFlags.Window);
+            FlagDirty(ScanHeadDirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -851,7 +835,7 @@ namespace JoeScan.Pinchot
             var pair = GetPair(camera);
             ExclusionMasks[pair] = mask.Clone() as ExclusionMask;
 
-            FlagDirty(DirtyStateFlags.ExclusionMask);
+            FlagDirty(ScanHeadDirtyStateFlags.ExclusionMask);
         }
 
         /// <summary>
@@ -893,7 +877,7 @@ namespace JoeScan.Pinchot
             var pair = GetPair(laser);
             ExclusionMasks[pair] = mask.Clone() as ExclusionMask;
 
-            FlagDirty(DirtyStateFlags.ExclusionMask);
+            FlagDirty(ScanHeadDirtyStateFlags.ExclusionMask);
         }
 
         /// <summary>
@@ -1196,6 +1180,9 @@ namespace JoeScan.Pinchot
                     $"and {Specification.MaxLaserOnTimeUs}µs.");
             }
 
+            // ensure the scan head has up to date configuration
+            scanSystem.PreSendConfiguration();
+
             var req = new Client::ImageRequestDataT()
             {
                 CameraPort = CameraIdToPort(camera),
@@ -1388,37 +1375,37 @@ namespace JoeScan.Pinchot
             _ = RequestStatus();
         }
 
-        internal void StartScanning(uint periodUs, AllDataFormat dataFormat, ulong startTimeNs)
+        internal void StartScanning(StartScanningOptions opts)
         {
             if (IsDirty())
             {
                 throw new InvalidOperationException("Scan head configuration was not sent prior to StartScanning");
             }
 
-            if (periodUs < Specification.MinScanPeriodUs)
+            if (opts.PeriodUs < Specification.MinScanPeriodUs)
             {
-                throw new ArgumentOutOfRangeException(nameof(periodUs),
-                    $"Scan period {periodUs}µs is smaller than specification " +
+                throw new ArgumentOutOfRangeException(nameof(opts),
+                    $"Scan period {opts.PeriodUs}µs is smaller than specification " +
                     $"{Specification.MinScanPeriodUs}µs for scan head {ID}");
             }
 
-            if (periodUs > Specification.MaxScanPeriodUs)
+            if (opts.PeriodUs > Specification.MaxScanPeriodUs)
             {
-                throw new ArgumentOutOfRangeException(nameof(periodUs),
-                    $"Scan period {periodUs}µs is bigger than specification " +
+                throw new ArgumentOutOfRangeException(nameof(opts),
+                    $"Scan period {opts.PeriodUs}µs is bigger than specification " +
                     $"{Specification.MaxScanPeriodUs}µs for scan head {ID}");
             }
 
-            if (periodUs < CachedStatus.MinScanPeriodUs)
+            if (opts.PeriodUs < CachedStatus.MinScanPeriodUs)
             {
-                throw new ArgumentOutOfRangeException(nameof(periodUs),
-                    $"Requested scan period {periodUs}µs is smaller than that allowed by the " +
+                throw new ArgumentOutOfRangeException(nameof(opts),
+                    $"Requested scan period {opts.PeriodUs}µs is smaller than that allowed by the " +
                     $"current scan head configuration {CachedStatus.MinScanPeriodUs}µs for scan head {ID}.");
             }
 
             ClearProfiles();
             QueueManager.Clear();
-            senderReceiver.StartScanning(periodUs, dataFormat, startTimeNs);
+            senderReceiver.StartScanning(opts);
         }
 
         internal void StopScanning()
@@ -1443,7 +1430,7 @@ namespace JoeScan.Pinchot
 
             Windows[pair] = window.Clone() as ScanWindow;
 
-            FlagDirty(DirtyStateFlags.Window);
+            FlagDirty(ScanHeadDirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -1515,10 +1502,20 @@ namespace JoeScan.Pinchot
             senderReceiver.SendCorrectionStoreData(pair, x, y, roll, notes);
         }
 
+        internal void SendScanSyncMapping(Dictionary<Encoder, uint> mapping)
+        {
+            if (!IsVersionCompatible(16, 3, 0))
+            {
+                return;
+            }
+
+            senderReceiver.SendScanSyncConfiguration(mapping);
+        }
+
         internal void Disconnect()
         {
-            dirtyState = DirtyStateFlags.AllDirty;
             senderReceiver.Disconnect();
+            FlagDirty(ScanHeadDirtyStateFlags.AllDirty);
         }
 
         /// <summary>
@@ -1568,6 +1565,9 @@ namespace JoeScan.Pinchot
             {
                 throw new InvalidOperationException("Scan system is scanning.");
             }
+
+            // ensure the scan head has up to date configuration
+            scanSystem.PreSendConfiguration();
 
             var requestData = new Client::ProfileRequestDataT
             {
@@ -1751,13 +1751,14 @@ namespace JoeScan.Pinchot
 
         internal bool IsDirty()
         {
-            return dirtyState != DirtyStateFlags.Clean;
+            return dirtyState != ScanHeadDirtyStateFlags.Clean;
         }
 
-        internal bool IsDirty(DirtyStateFlags flag)
+        internal bool IsDirty(ScanHeadDirtyStateFlags flag)
         {
             return dirtyState.HasFlag(flag);
         }
+
         #endregion
 
         #region Private Methods
@@ -1788,6 +1789,9 @@ namespace JoeScan.Pinchot
                 case ProductType.JS50Z830:
                     binName = "js50z830.bin";
                     break;
+                case ProductType.JS50Phaser:
+                    binName = "js50phaser.bin";
+                    break;
                 default:
                     throw new ArgumentException($"Invalid product type: {type}.", nameof(type));
             }
@@ -1795,19 +1799,19 @@ namespace JoeScan.Pinchot
             return Schema.ProductSpecification.GetSpecification(binName);
         }
 
-        internal void FlagDirty(DirtyStateFlags dirtyFlag)
+        internal void FlagDirty(ScanHeadDirtyStateFlags flag)
         {
-            if (dirtyFlag.Equals(DirtyStateFlags.Clean))
+            if (flag.Equals(ScanHeadDirtyStateFlags.Clean))
             {
                 return;
             }
 
-            dirtyState |= dirtyFlag;
+            dirtyState |= flag;
         }
 
         internal void ClearDirty()
         {
-            dirtyState = DirtyStateFlags.Clean;
+            dirtyState = ScanHeadDirtyStateFlags.Clean;
         }
 
         #endregion

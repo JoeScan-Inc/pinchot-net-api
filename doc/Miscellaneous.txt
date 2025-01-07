@@ -1,0 +1,6 @@
+/**
+\defgroup Miscellaneous
+\brief These functions are general helpers to dealing with errors etc.
+
+These classes and functions provide useful diagnostic information, such as firmware version, scan head status, and error descriptions. They are not necessary to set up a scan system and gather profile data.
+*/

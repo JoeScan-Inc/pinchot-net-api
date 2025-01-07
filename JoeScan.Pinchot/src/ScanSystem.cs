@@ -25,18 +25,19 @@ namespace JoeScan.Pinchot
     /// accessing the <see cref="ScanHead"/>s, connecting/disconnecting to/from the <see cref="ScanHead"/>s, and
     /// starting/stopping scanning on the <see cref="ScanHead"/>s.
     /// </remarks>
+    /// @ingroup Connecting
     public partial class ScanSystem : IDisposable
     {
         #region Private Fields
 
         private readonly ConcurrentDictionary<uint, ScanHead> idToScanHead = new ConcurrentDictionary<uint, ScanHead>();
         private BlockingCollection<IProfile>[] profileBuffers = Array.Empty<BlockingCollection<IProfile>>();
-        private readonly ScanSyncReceiver scanSyncReceiver = new ScanSyncReceiver();
         private CancellationTokenSource keepAliveTokenSource;
         private CancellationToken keepAliveToken;
         private bool disposed;
         private uint currentSequence = 1;
         private int profilesPerFrame;
+        private ScanSystemDirtyStateFlags dirtyFlags;
 
         /// <summary>
         /// The maximum number of profiles that can be queued before
@@ -53,20 +54,6 @@ namespace JoeScan.Pinchot
 
         #endregion
 
-        #region Events
-
-        /// <summary>
-        /// This event can be used to listen for ScanSync updates for diagnostic purposes.
-        /// It will be raised for every 1000 ScanSync updates or roughly once every second.
-        /// </summary>
-        public event EventHandler<ScanSyncUpdateEvent> ScanSyncUpdateEvent
-        {
-            add => scanSyncReceiver.ScanSyncUpdate += value;
-            remove => scanSyncReceiver.ScanSyncUpdate -= value;
-        }
-
-        #endregion
-
         #region Public Properties
 
         /// <summary>
@@ -75,6 +62,8 @@ namespace JoeScan.Pinchot
         /// <value>
         /// A value indicating whether the scan system is actively scanning.
         /// </value>
+        /// <seealso cref="StartScanning(uint, DataFormat, ScanningMode)"/>
+        /// <seealso cref="StartScanning(StartScanningOptions)"/>
         public bool IsScanning => ScanHeads.Count != 0 && ScanHeads.All(s => s.IsScanning);
 
         /// <summary>
@@ -83,6 +72,7 @@ namespace JoeScan.Pinchot
         /// <value>
         /// A value indicating whether all <see cref="ScanHeads"/> have established network connection.
         /// </value>
+        /// @ingroup Connecting
         public bool IsConnected => ScanHeads.Count != 0 && ScanHeads.All(s => s.IsConnected);
 
         /// <summary>
@@ -92,9 +82,9 @@ namespace JoeScan.Pinchot
         /// will be a time penalty before receiving profiles.
         /// </summary>
         /// <value>
-        /// A <see cref="bool"/> value indicating whether the scan system is configured (`true`) or not (`false`).
+        /// A <see cref="bool"/> value indicating whether the scan system is configured (<see langword="true"/>) or not (<see langword="false"/>).
         /// </value>
-        public bool IsConfigured => ScanHeads.Count != 0 && ScanHeads.All(s => !s.IsDirty());
+        public bool IsConfigured => ScanHeads.Count != 0 && ScanHeads.All(s => !s.IsDirty()) && !IsDirty();
 
         /// <summary>
         /// Gets a read-only collection of <see cref="ScanHead"/>s belonging to the scan system.
@@ -109,13 +99,21 @@ namespace JoeScan.Pinchot
         /// <value>The units of the scan system.</value>
         public ScanSystemUnits Units { get; }
 
+        /// <summary>
+        /// Gets the idle scan period set by <see cref="StartScanning(StartScanningOptions)"/>.
+        /// </summary>
+        /// <value>
+        /// The idle scan period in microseconds. If the value is <see langword="null"/>,
+        /// idle scanning is disabled.
+        /// </value>
+        /// <seealso cref="StartScanningOptions.IdlePeriodUs"/>
+        public uint? IdlePeriodUs { get; private set; }
+
         #endregion
 
         #region Internal Properties
 
         internal Client::ConnectionType ConnectionType { get; set; }
-
-        internal ScanSyncData LatestScanSyncData => scanSyncReceiver.LatestData;
 
         #endregion
 
@@ -130,15 +128,16 @@ namespace JoeScan.Pinchot
         /// </param>
         public ScanSystem(ScanSystemUnits units)
         {
+            if (units == ScanSystemUnits.Invalid)
+            {
+                throw new ArgumentException("Invalid units.", nameof(units));
+            }
+
             ResolutionPresets.Load();
             Units = units;
             DiscoverDevices();
-        }
 
-        /// <nodoc/>
-        ~ScanSystem()
-        {
-            Dispose(false);
+            FlagDirty(ScanSystemDirtyStateFlags.AllDirty);
         }
 
         /// <summary>
@@ -309,36 +308,46 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Can not configure scan system while scanning.");
             }
 
-            bool sendConfiguration = !IsConfigured;
-            if (sendConfiguration)
+            if (!IsConfigured)
             {
                 Parallel.ForEach(ScanHeads, sh =>
                 {
-                    if (sh.IsDirty(DirtyStateFlags.Window))
+                    if (!(sh is Phaser))
                     {
-                        sh.SendAllWindows();
-                        sh.StoreAllAlignments();
+                        if (sh.IsDirty(ScanHeadDirtyStateFlags.Window))
+                        {
+                            sh.SendAllWindows();
+                            sh.StoreAllAlignments();
+                        }
+
+                        if (sh.IsDirty(ScanHeadDirtyStateFlags.ExclusionMask))
+                        {
+                            sh.SendAllExclusionMasks();
+                        }
+
+                        if (sh.IsDirty(ScanHeadDirtyStateFlags.BrightnessCorrection))
+                        {
+                            sh.SendAllBrightnessCorrections();
+                        }
                     }
 
-                    if (sh.IsDirty(DirtyStateFlags.ExclusionMask))
+                    if (IsDirty(ScanSystemDirtyStateFlags.ScanSyncMapping))
                     {
-                        sh.SendAllExclusionMasks();
-                    }
-
-                    if (sh.IsDirty(DirtyStateFlags.BrightnessCorrection))
-                    {
-                        sh.SendAllBrightnessCorrections();
+                        // only send if user has set a mapping (main encoder must be set)
+                        if (encoderToScanSyncMapping.TryGetValue(Encoder.Main, out _))
+                        {
+                            sh.SendScanSyncMapping(encoderToScanSyncMapping);
+                        }
                     }
 
                     sh.RequestStatus();
                     sh.ClearDirty();
                 });
-            }
 
-            if (sendConfiguration || phaseTableIsDirty)
-            {
                 UpdateCameraLaserConfigurations();
             }
+
+            ClearDirty();
         }
 
         // TODO: wait for connect should be optional
@@ -404,6 +413,11 @@ namespace JoeScan.Pinchot
             {
                 foreach (var sh in ScanHeads)
                 {
+                    if (sh is Phaser)
+                    {
+                        continue;
+                    }
+
                     var goodCameras = sh.CachedStatus.DetectedCameras;
                     string badCameras = string.Join(",", sh.Cameras.Except(goodCameras));
                     if (badCameras.Any())
@@ -444,6 +458,8 @@ namespace JoeScan.Pinchot
             {
                 s.Disconnect();
             }
+
+            FlagDirty(ScanSystemDirtyStateFlags.AllDirty);
         }
 
         /// <summary>
@@ -468,6 +484,8 @@ namespace JoeScan.Pinchot
         /// -or-<br/>
         /// <see cref="IsScanning"/> is `true`.<br/>
         /// -or-<br/>
+        /// There are no phases or phaseable elements in the phase table.<br/>
+        /// -or-<br/>
         /// There are duplicate elements from the same scan head in the phase table.<br/>
         /// -or-<br/>
         /// A loss of communication with any scan head occurred, usually caused by a network or power issue.
@@ -479,13 +497,150 @@ namespace JoeScan.Pinchot
         /// A scan head has a firmware version that is incompatible with frame
         /// scanning (when <paramref name="mode"/> is <see cref="ScanningMode.Frame"/>).
         /// </exception>
+        /// <seealso cref="StartScanning(StartScanningOptions)"/>
+        /// <seealso cref="StopScanning"/>
         public void StartScanning(uint periodUs, DataFormat dataFormat, ScanningMode mode = ScanningMode.Profile)
         {
-            StartScanning(periodUs, (AllDataFormat)dataFormat, mode);
+            var opts = new StartScanningOptions
+            {
+                PeriodUs = periodUs,
+                Format = dataFormat,
+                Mode = mode,
+            };
+
+            StartScanning(opts);
         }
 
         /// <summary>
-        /// Stops scanning on all <see cref="ScanHeads"/>.
+        /// Starts scanning on all <see cref="ScanHead"/>s.
+        /// </summary>
+        /// <remarks>
+        /// All existing <see cref="IProfile"/>s and <see cref="IFrame"/>s will be cleared from all <see cref="ScanHead"/>s
+        /// when calling this method. Ensure that all data from the previous scan that is desired
+        /// is read out before calling this method.
+        /// </remarks>
+        /// <param name="options">The scan options.</param>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
+        /// -or-<br/>
+        /// <see cref="IsScanning"/> is <see langword="true"/>.<br/>
+        /// -or-<br/>
+        /// There are no phases or phaseable elements in the phase table.<br/>
+        /// -or-<br/>
+        /// There are duplicate elements from the same scan head in the phase table.<br/>
+        /// -or-<br/>
+        /// A loss of communication with any scan head occurred, usually caused by a network or power issue.
+        /// </exception>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Requested scan period <see cref="StartScanningOptions.PeriodUs"/> is invalid.
+        /// </exception>
+        /// <exception cref="VersionCompatibilityException">
+        /// A <see cref="ScanHead"/> has a <see cref="ScanHead.Version"/> that is incompatible with frame
+        /// scanning (when <see cref="StartScanningOptions.Mode"/> is <see cref="ScanningMode.Frame"/>).
+        /// </exception>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="options"/> is <see langword="null"/>.
+        /// </exception>
+        /// <seealso cref="StartScanning(uint, DataFormat, ScanningMode)"/>
+        /// <seealso cref="StopScanning"/>
+        public void StartScanning(StartScanningOptions options)
+        {
+            if (options == null)
+            {
+                throw new ArgumentNullException(nameof(options));
+            }
+
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException("Attempting to start scanning when not connected.");
+            }
+
+            if (IsScanning)
+            {
+                throw new InvalidOperationException("Attempting to start scanning while already scanning.");
+            }
+
+            if (NumberOfPhases == 0 || phaseTable.Any(p => p.Elements.Count == 0))
+            {
+                throw new InvalidOperationException("Cannot start scanning without a phase table.");
+            }
+
+            IdlePeriodUs = options.IdlePeriodUs;
+
+            PreSendConfiguration();
+
+            long minScanPeriodUs = GetMinScanPeriod();
+
+            if (options.PeriodUs < minScanPeriodUs)
+            {
+                throw new ArgumentOutOfRangeException(
+                    "Scan period is smaller than the minimum allowed for the system. " +
+                    $"Requested {options.PeriodUs}µs but minimum is {minScanPeriodUs}µs.");
+            }
+
+            if (options.Mode == ScanningMode.Frame)
+            {
+                foreach (var sh in ScanHeads)
+                {
+                    if (!sh.IsVersionCompatible(16, 2, 0))
+                    {
+                        throw new VersionCompatibilityException("Frame scanning is only compatible with scan heads on firmware version 16.2.0 or greater.");
+                    }
+                }
+
+                var phaseElements = phaseTable.SelectMany(p => p.Elements);
+                foreach (var group in phaseElements.GroupBy(p => p.ScanHead))
+                {
+                    var scanHead = group.Key;
+                    var validElements = group.Select(g => new CameraLaserPair(scanHead, g.CameraPort, g.LaserPort));
+                    scanHead.QueueManager.SetValidCameraLaserPairs(validElements);
+                }
+
+                profilesPerFrame = ScanHeads.Sum(sh => sh.QueueManager.NumQueues);
+
+                bool hasDuplicatePhaseElements = phaseTable.SelectMany(p => p.Elements)
+                                                 .GroupBy(e => new { e.ScanHead.ID, e.LaserPort, e.CameraPort })
+                                                 .Any(g => g.Count() > 1);
+                if (hasDuplicatePhaseElements)
+                {
+                    throw new InvalidOperationException("Duplicate element in phase table.");
+                }
+
+                currentSequence = 1;
+            }
+
+            // The API sets the time to start scanning to avoid a rollover bug that
+            // can occur within the firmware. This value was picked arbitrarily and
+            // tested to make sure it always sets a time in the future. If there is
+            // no encoder, the time will be set to 0 which will cause the scan heads
+            // to determine their start time independently.
+            const ulong startScanningOffsetNs = 22_000_000;
+            var mapping = GetScanSyncMapping();
+
+            // if there is a main ScanSync, get the most recent timestamp from it
+            if (mapping.Count > 0)
+            {
+                uint mainScanSyncSerial = mapping.First().Value;
+                if (scanSyncReceiver.TryGetScanSyncData(mainScanSyncSerial, out var data))
+                {
+                    ulong lastTimestampNs = data.EncoderTimestampNs;
+                    options.StartScanningTimeNs = lastTimestampNs != 0 ? lastTimestampNs + startScanningOffsetNs : 0;
+                }
+                else
+                {
+                    throw new InvalidOperationException($"ScanSync {mainScanSyncSerial} is not found on the network.");
+                }
+            }
+
+            Parallel.ForEach(ScanHeads, scanHead => scanHead.StartScanning(options));
+
+            keepAliveTokenSource = new CancellationTokenSource();
+            keepAliveToken = keepAliveTokenSource.Token;
+            Task.Run(KeepAliveLoop, keepAliveToken);
+        }
+
+        /// <summary>
+        /// Stops scanning on all <see cref="ScanHead"/>s.
         /// </summary>
         /// <remarks>
         /// Physical scan heads will take approximately 0.5-1.0 seconds to stop scanning after <see cref="StopScanning"/>
@@ -533,10 +688,8 @@ namespace JoeScan.Pinchot
             // ensure configuration is sent to scan head so the min scan period is accurate
             PreSendConfiguration();
 
-            uint phaseTableDurationUs = (uint)CalculatePhaseDurations().Sum(d => d);
-            uint cameraOffsetUs = (uint)Math.Ceiling(CameraStartEarlyOffsetNs / 1000.0);
-
-            return phaseTableDurationUs + cameraOffsetUs;
+            long phaseTableDurationNs = CalculatePhaseDurations().Sum(d => d);
+            return (uint)Math.Ceiling(phaseTableDurationNs / 1000.0);
         }
 
         /// <summary>
@@ -673,7 +826,14 @@ namespace JoeScan.Pinchot
 
         internal void StartScanningSubpixel(uint periodUs, SubpixelDataFormat dataFormat)
         {
-            StartScanning(periodUs, (AllDataFormat)dataFormat, ScanningMode.Profile);
+            var opts = new StartScanningOptions
+            {
+                PeriodUs = periodUs,
+                Mode = ScanningMode.Profile,
+                AllFormat = (AllDataFormat)dataFormat,
+            };
+
+            StartScanning(opts);
         }
 
         /// <summary>
@@ -750,87 +910,21 @@ namespace JoeScan.Pinchot
 
         #region Private Methods
 
-        private void StartScanning(uint periodUs, AllDataFormat dataFormat, ScanningMode mode)
-        {
-            if (!IsConnected)
-            {
-                throw new InvalidOperationException("Attempting to start scanning when not connected.");
-            }
-
-            if (IsScanning)
-            {
-                throw new InvalidOperationException("Attempting to start scanning while already scanning.");
-            }
-
-            PreSendConfiguration();
-
-            long minScanPeriodUs = GetMinScanPeriod();
-
-            if (periodUs < minScanPeriodUs)
-            {
-                throw new ArgumentOutOfRangeException(nameof(periodUs),
-                    "Scan period is smaller than the minimum allowed for the system. " +
-                    $"Requested {periodUs}µs but minimum is {minScanPeriodUs}µs.");
-            }
-
-            if (mode == ScanningMode.Frame)
-            {
-                foreach (var sh in ScanHeads)
-                {
-                    if (!sh.IsVersionCompatible(16, 2, 0))
-                    {
-                        throw new VersionCompatibilityException("Frame scanning is only compatible with scan heads on firmware version 16.2.0 or greater.");
-                    }
-                }
-
-                var phaseElements = phaseTable.SelectMany(p => p.Elements);
-                foreach (var group in phaseElements.GroupBy(p => p.ScanHead))
-                {
-                    var scanHead = group.Key;
-                    var validElements = group.Select(g => new CameraLaserPair(scanHead, g.CameraPort, g.LaserPort));
-                    scanHead.QueueManager.SetValidCameraLaserPairs(validElements);
-                }
-
-                profilesPerFrame = ScanHeads.Sum(sh => sh.QueueManager.NumQueues);
-
-                bool hasDuplicatePhaseElements = phaseTable.SelectMany(p => p.Elements)
-                                                 .GroupBy(e => new { e.ScanHead.ID, e.LaserPort, e.CameraPort })
-                                                 .Any(g => g.Count() > 1);
-                if (hasDuplicatePhaseElements)
-                {
-                    throw new InvalidOperationException("Duplicate element in phase table.");
-                }
-
-                currentSequence = 1;
-            }
-
-            // The API sets the time to start scanning to avoid a rollover bug that
-            // can occur within the firmware. This value was picked arbitrarily and
-            // tested to make sure it always sets a time in the future.
-            const ulong startScanningOffsetNs = 22_000_000;
-            ulong startScanningTimeNs = LatestScanSyncData.EncoderTimestampNs + startScanningOffsetNs;
-
-            Parallel.ForEach(ScanHeads, scanHead =>
-            {
-                scanHead.Mode = mode;
-                scanHead.StartScanning(periodUs, dataFormat, startScanningTimeNs);
-            });
-
-            keepAliveTokenSource = new CancellationTokenSource();
-            keepAliveToken = keepAliveTokenSource.Token;
-            Task.Run(KeepAliveLoop, keepAliveToken);
-        }
-
         private bool WaitForFrame(TimeSpan timeout, CancellationToken token = default)
         {
             var start = DateTime.Now;
             while (!token.IsCancellationRequested)
             {
-                long minSeq = long.MaxValue;
-                long maxSize = long.MinValue;
+                uint minSeq = uint.MaxValue;
+                int maxSize = 0;
 
                 foreach (var sh in ScanHeads)
                 {
+                    if (sh is Phaser phaser && currentSequence % phaser.FramesPerStrobe != 0)
+                    {
+                        continue;
+                    }
+
                     var stats = sh.QueueManager.GetStats();
                     if (minSeq > stats.MinSeq) { minSeq = stats.MinSeq; }
                     if (maxSize < stats.MaxSize) { maxSize = stats.MaxSize; }
@@ -845,6 +939,10 @@ namespace JoeScan.Pinchot
 
                 if (minSeq >= currentSequence || maxSize >= FrameThreshold)
                 {
+                    // frame is ready, update the sequence number in case we
+                    // fell behind and need to catch up but it should almost
+                    // always just be the next monotonic number
+                    currentSequence = minSeq;
                     return true;
                 }
 
@@ -933,12 +1031,12 @@ namespace JoeScan.Pinchot
                 sh.CameraLaserConfigurations.Clear();
             }
 
-            uint currPhaseEndOffsetNs = CameraStartEarlyOffsetNs;
-            var durationsUs = CalculatePhaseDurations();
+            uint currPhaseEndOffsetNs = 0;
+            var durationsNs = CalculatePhaseDurations();
 
             foreach ((var phase, int phaseNumber) in phaseTable.Select((p, it) => (p, it)))
             {
-                currPhaseEndOffsetNs += durationsUs[phaseNumber] * 1000;
+                currPhaseEndOffsetNs += durationsNs[phaseNumber];
 
                 foreach (var element in phase.Elements)
                 {
@@ -954,13 +1052,15 @@ namespace JoeScan.Pinchot
                     var laser = scanHead.LaserPortToId(element.LaserPort);
                     var pair = new CameraLaserPair(camera, laser);
                     var conf = element.Configuration ?? scanHead.Configuration;
+
+                    // TODO: Create a new configuration object for strobes
                     var clc = new Client::CameraLaserConfigurationT
                     {
                         CameraPort = element.CameraPort,
                         LaserPort = element.LaserPort,
-                        LaserOnTimeMinNs = conf.MinLaserOnTimeUs * 1000,
-                        LaserOnTimeDefNs = conf.DefaultLaserOnTimeUs * 1000,
-                        LaserOnTimeMaxNs = conf.MaxLaserOnTimeUs * 1000,
+                        LaserOnTimeMinNs = element.IsStrobe ? element.StrobeDurationNs : conf.MinLaserOnTimeUs * 1000,
+                        LaserOnTimeDefNs = element.IsStrobe ? element.StrobeDurationNs : conf.DefaultLaserOnTimeUs * 1000,
+                        LaserOnTimeMaxNs = element.IsStrobe ? element.StrobeDurationNs : conf.MaxLaserOnTimeUs * 1000,
                         ScanEndOffsetNs = currPhaseEndOffsetNs,
                         CameraOrientation = scanHead.GetCameraOrientation(pair)
                     };
@@ -968,8 +1068,31 @@ namespace JoeScan.Pinchot
                     scanHead.CameraLaserConfigurations.Add(clc);
                 }
             }
+        }
 
-            phaseTableIsDirty = false;
+        private bool IsDirty()
+        {
+            return dirtyFlags != ScanSystemDirtyStateFlags.Clean;
+        }
+
+        private bool IsDirty(ScanSystemDirtyStateFlags flag)
+        {
+            return dirtyFlags.HasFlag(flag);
+        }
+
+        private void FlagDirty(ScanSystemDirtyStateFlags flag)
+        {
+            if (flag.Equals(ScanSystemDirtyStateFlags.Clean))
+            {
+                return;
+            }
+
+            dirtyFlags |= flag;
+        }
+
+        private void ClearDirty()
+        {
+            dirtyFlags = ScanSystemDirtyStateFlags.Clean;
         }
 
         #endregion

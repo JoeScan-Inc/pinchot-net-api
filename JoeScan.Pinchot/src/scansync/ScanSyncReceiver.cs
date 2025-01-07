@@ -4,6 +4,8 @@
 // root for license information.
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -18,33 +20,14 @@ namespace JoeScan.Pinchot
         private CancellationToken token;
         private readonly Thread threadMain;
         private bool disposed;
-        private readonly object dataLock = new object();
-
-        #endregion
-
-        #region Backing Fields
-
-        private ScanSyncData latestData = new ScanSyncData();
+        private readonly object activeScanSyncsLock = new object();
+        private readonly Dictionary<uint, ActiveScanSync> activeScanSyncs = new Dictionary<uint, ActiveScanSync>();
 
         #endregion
 
         #region Internal Properties
 
         internal bool IsRunning { get; private set; }
-
-        /// <summary>
-        /// The most recently received ScanSync data.
-        /// </summary>
-        internal ScanSyncData LatestData
-        {
-            get
-            {
-                lock (dataLock)
-                {
-                    return latestData;
-                }
-            }
-        }
 
         #endregion
 
@@ -80,7 +63,6 @@ namespace JoeScan.Pinchot
         /// Releases the unmanaged resources used by the <see cref="ScanSyncReceiver"/> and optionally
         /// releases the managed resources.
         /// </summary>
-        /// <param name="disposing"></param>
         protected virtual void Dispose(bool disposing)
         {
             if (disposed)
@@ -96,6 +78,28 @@ namespace JoeScan.Pinchot
             }
 
             disposed = true;
+        }
+
+        #endregion
+
+        #region Internal Methods
+
+        internal Dictionary<uint, ScanSyncData> GetScanSyncs()
+        {
+            lock (activeScanSyncsLock)
+            {
+                return activeScanSyncs.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ScanSync);
+            }
+        }
+
+        internal bool TryGetScanSyncData(uint serial, out ScanSyncData data)
+        {
+            lock (activeScanSyncsLock)
+            {
+                bool success = activeScanSyncs.TryGetValue(serial, out var activeScanSync);
+                data = success ? activeScanSync.ScanSync : default;
+                return success;
+            }
         }
 
         #endregion
@@ -117,48 +121,73 @@ namespace JoeScan.Pinchot
             token.Register(() => receiverClient.Close());
 
             int eventCounter = 0;
-            IPEndPoint iPEndPoint = null;
+            IPEndPoint ipEndPoint = null;
 
             const int scanSyncUpdatePeriodMs = 1;
             const int eventPeriodMs = 1000;
+            const int timeoutMs = 1000;
+
             const int eventTriggerCount = eventPeriodMs / scanSyncUpdatePeriodMs;
 
-            while (true)
+            try
             {
-                try
+                while (!token.IsCancellationRequested)
                 {
-                    token.ThrowIfCancellationRequested();
-
-                    byte[] buf = receiverClient.Receive(ref iPEndPoint);
+                    byte[] buf = receiverClient.Receive(ref ipEndPoint);
                     if (!ScanSyncData.IsValidPacketSize(buf))
                     {
                         continue;
                     }
 
-                    var pkt = new ScanSyncData(buf);
+                    var pkt = new ScanSyncData(buf, ipEndPoint.Address);
 
-                    // currently only support 1 encoder (main)
-                    // if two encoders are present on the network, the lowest
-                    // serial number is considered to be the "main" one
-                    if (pkt.SerialNumber <= LatestData.SerialNumber || LatestData.SerialNumber == 0)
+                    lock (activeScanSyncsLock)
                     {
-                        lock (dataLock)
+                        // update or add to active scan syncs
+                        if (activeScanSyncs.TryGetValue(pkt.SerialNumber, out var a))
                         {
-                            latestData = pkt;
+                            a.ScanSync = pkt;
+                            a.LastUpdateTick = Environment.TickCount;
                         }
-
-                        if (eventCounter++ == eventTriggerCount)
+                        else
                         {
-                            ScanSyncUpdate?.Invoke(this, new ScanSyncUpdateEvent(latestData));
-                            eventCounter = 0;
+                            activeScanSyncs.Add(pkt.SerialNumber, new ActiveScanSync
+                            {
+                                ScanSync = pkt,
+                                LastUpdateTick = Environment.TickCount
+                            });
+                        }
+                    }
+
+                    // check if any ScanSyncs have timed out, and if so, remove them
+                    var timedOut = activeScanSyncs
+                                    .Where(ss => Environment.TickCount - ss.Value.LastUpdateTick > timeoutMs)
+                                    .ToList();
+
+                    if (timedOut.Count > 0)
+                    {
+                        lock (activeScanSyncsLock)
+                        {
+                            foreach (var to in timedOut)
+                            {
+                                activeScanSyncs.Remove(to.Key);
+                            }
+                        }
+                    }
+
+                    // trigger update event if needed
+                    if (ScanSyncUpdate != null && eventCounter++ == eventTriggerCount)
+                    {
+                        eventCounter = 0;
+                        var scanSyncs = activeScanSyncs.Select(ss => ss.Value.ScanSync).ToList();
+                        if (scanSyncs.Count > 0)
+                        {
+                            ScanSyncUpdate?.Invoke(this, new ScanSyncUpdateEvent(scanSyncs));
                         }
                     }
                 }
-                catch (Exception)
-                {
-                    break;
-                }
             }
+            catch { }
 
             IsRunning = false;
         }
