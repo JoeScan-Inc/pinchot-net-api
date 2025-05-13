@@ -40,6 +40,7 @@ namespace JoeScan.Pinchot
         private uint currentSkipCount;
 
         private bool disposed;
+        private static readonly object tcp_send_lock = new object();
 
         private readonly byte[] StopScanningRequest = new Client::MessageClientT() { Type = Client::MessageType.SCAN_STOP }.SerializeToBinary();
         private readonly byte[] DisconnectRequest = new Client::MessageClientT() { Type = Client::MessageType.DISCONNECT }.SerializeToBinary();
@@ -393,10 +394,16 @@ namespace JoeScan.Pinchot
         /// </exception>
         internal static void TcpSend(byte[] packet, NetworkStream stream)
         {
-            // Framing packet
-            stream.Write(BitConverter.GetBytes(packet.Length), 0, sizeof(int));
-            // Payload
-            stream.Write(packet, 0, packet.Length);
+            // we need to lock to ensure that the framing packet and the
+            // payload are sent together because multiple threads could
+            // be sending commands at the same time (keep alive, async ops, etc)
+            lock (tcp_send_lock)
+            {
+                // Framing packet
+                stream.Write(BitConverter.GetBytes(packet.Length), 0, sizeof(int));
+                // Payload
+                stream.Write(packet, 0, packet.Length);
+            }
         }
 
         /// <summary>
