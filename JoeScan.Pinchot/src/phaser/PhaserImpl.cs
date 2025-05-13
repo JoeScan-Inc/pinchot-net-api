@@ -87,12 +87,6 @@ namespace JoeScan.Pinchot
     {
         internal Dictionary<Strobe, StrobeConfiguration> StrobeConfigurations { get; } = new Dictionary<Strobe, StrobeConfiguration>();
 
-        /// <summary>
-        /// The number of complete frames that occur between each strobe. This is inclusive, i.e., a value of 1
-        /// means the strobe is on every frame. The first strobe will always happen on the first frame of the scan.
-        /// </summary>
-        public uint FramesPerStrobe { get; set; } = 1;
-
         internal Phaser(ScanSystem scanSystem, DiscoveredDevice device, uint serialNumber, uint id)
             : base(scanSystem, device, serialNumber, id)
         { }
@@ -141,6 +135,12 @@ namespace JoeScan.Pinchot
     /// </summary>
     public class StrobeConfiguration
     {
+        /// <summary>
+        /// The number of complete frames that occur between each strobe. This is inclusive, i.e., a value of 1
+        /// means the strobe is on every frame. The first strobe will always happen on the first frame of the scan.
+        /// </summary>
+        public uint FramesPerStrobe { get; set; } = 1;
+
         /// <summary>
         /// This value can be used to apply an offset to the start of the strobe relative
         /// to the start of the phase. This can be a negative value to start the strobe
@@ -215,11 +215,11 @@ namespace JoeScan.Pinchot
                     Type = Client.MessageData.PhaserConfigurationData,
                     Value = new Client::PhaserConfigurationDataT
                     {
-                        FramesPerStrobe = phaser.FramesPerStrobe,
                         StrobeConfiguration = phaser.StrobeConfigurations.Select(sc =>
                             new Client::StrobeConfigurationT
                             {
                                 Port = phaser.StrobeIdToPort(sc.Key),
+                                FramesPerStrobe = (uint)sc.Value.FramesPerStrobe,
                                 StartOffsetNs = (long)(sc.Value.StrobeStartOffsetUs * 1000),
                                 EndOffsetNs = (long)(sc.Value.StrobeEndOffsetUs * 1000),
                                 Polarity = (Client::StrobePolarity)sc.Value.Polarity

@@ -52,21 +52,21 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Gets the major version component of the of the Pinchot version.
+        /// Gets the major version component of the Pinchot version.
         /// </summary>
-        /// <value>The major version component of the of the Pinchot version.</value>
+        /// <value>The major version component of the Pinchot version.</value>
         public static int Major => Assembly.GetExecutingAssembly().GetName().Version.Major;
 
         /// <summary>
-        /// Gets the minor version component of the of the Pinchot version.
+        /// Gets the minor version component of the Pinchot version.
         /// </summary>
-        /// <value>The minor version component of the of the Pinchot version.</value>
+        /// <value>The minor version component of the Pinchot version.</value>
         public static int Minor => Assembly.GetExecutingAssembly().GetName().Version.Minor;
 
         /// <summary>
-        /// Gets the patch version component of the of the Pinchot version.
+        /// Gets the patch version component of the Pinchot version.
         /// </summary>
-        /// <value>The patch version component of the of the Pinchot version.</value>
+        /// <value>The patch version component of the Pinchot version.</value>
         public static int Patch => Assembly.GetExecutingAssembly().GetName().Version.Build;
     }
 }

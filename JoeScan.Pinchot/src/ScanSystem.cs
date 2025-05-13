@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -34,10 +35,13 @@ namespace JoeScan.Pinchot
         private BlockingCollection<IProfile>[] profileBuffers = Array.Empty<BlockingCollection<IProfile>>();
         private CancellationTokenSource keepAliveTokenSource;
         private CancellationToken keepAliveToken;
+        private CancellationTokenSource heartBeatTokenSource;
+        private CancellationToken heartBeatToken;
         private bool disposed;
         private uint currentSequence = 1;
         private int profilesPerFrame;
         private ScanSystemDirtyStateFlags dirtyFlags;
+        private bool heartBeatRunning;
 
         /// <summary>
         /// The maximum number of profiles that can be queued before
@@ -51,6 +55,16 @@ namespace JoeScan.Pinchot
         /// a scheduler tick could happen while a camera is exposing if the scan period is set aggressively.
         /// </summary>
         private const uint CameraStartEarlyOffsetNs = 9500;
+
+        /// <summary>
+        /// The timeout value in milliseconds used for the heartbeat mechanism.
+        /// </summary>
+        /// <remarks>
+        /// The heartbeat mechanism is used to monitor the connection status with scan heads. If a scan head
+        /// does not respond within the specified timeout period, it is considered disconnected.
+        /// This feature is only available for scan heads running firmware version 16.3.0 or higher.
+        /// </remarks>
+        private const int HeartBeatTimeoutMs = 2200;
 
         #endregion
 
@@ -130,7 +144,7 @@ namespace JoeScan.Pinchot
         {
             if (units == ScanSystemUnits.Invalid)
             {
-                throw new ArgumentException("Invalid units.", nameof(units));
+                ThrowArgumentException("Invalid units.", nameof(units));
             }
 
             ResolutionPresets.Load();
@@ -167,6 +181,7 @@ namespace JoeScan.Pinchot
                     scanHead?.Dispose();
                 }
 
+                StopHeartBeat();
                 keepAliveTokenSource?.Cancel();
                 keepAliveTokenSource?.Dispose();
                 scanSyncReceiver?.Dispose();
@@ -203,22 +218,22 @@ namespace JoeScan.Pinchot
         {
             if (IsConnected)
             {
-                throw new InvalidOperationException("Can not add scan head while connected.");
+                ThrowInvalidOperationException("Can not add scan head while connected.");
             }
 
             if (IsScanning)
             {
-                throw new InvalidOperationException("Can not add scan head while scanning.");
+                ThrowInvalidOperationException("Can not add scan head while scanning.");
             }
 
             if (idToScanHead.Values.Any(sh => sh.SerialNumber == serialNumber))
             {
-                throw new ArgumentException($"Scan head with serial number \"{serialNumber}\" is already managed.");
+                ThrowArgumentException($"Scan head with serial number \"{serialNumber}\" is already managed.");
             }
 
             if (idToScanHead.ContainsKey(id))
             {
-                throw new ArgumentException("ID is already assigned to another scan head.");
+                ThrowArgumentException("ID is already assigned to another scan head.");
             }
 
             if (!discoveries.ContainsKey(serialNumber))
@@ -227,7 +242,7 @@ namespace JoeScan.Pinchot
                 DiscoverDevices();
                 if (!discoveries.ContainsKey(serialNumber))
                 {
-                    throw new ArgumentException($"Scan head {serialNumber} cannot be found on network.");
+                    ThrowArgumentException($"Scan head {serialNumber} cannot be found on network.");
                 }
             }
 
@@ -250,7 +265,7 @@ namespace JoeScan.Pinchot
             var scanHead = idToScanHead.Values.FirstOrDefault(sh => sh.SerialNumber == serialNumber);
             if (scanHead is null)
             {
-                throw new ArgumentException($"Scan head with serial number {serialNumber} is not managed.",
+                ThrowArgumentException($"Scan head with serial number {serialNumber} is not managed.",
                     nameof(serialNumber));
             }
 
@@ -268,7 +283,7 @@ namespace JoeScan.Pinchot
         {
             if (!idToScanHead.ContainsKey(id))
             {
-                throw new ArgumentException($"Scan head with ID {id} is not managed.", nameof(id));
+                ThrowArgumentException($"Scan head with ID {id} is not managed.", nameof(id));
             }
 
             return idToScanHead[id];
@@ -300,12 +315,12 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                throw new InvalidOperationException("Can not configure scan system while disconnected.");
+                ThrowInvalidOperationException("Can not configure scan system while disconnected.");
             }
 
             if (IsScanning)
             {
-                throw new InvalidOperationException("Can not configure scan system while scanning.");
+                ThrowInvalidOperationException("Can not configure scan system while scanning.");
             }
 
             if (!IsConfigured)
@@ -373,30 +388,30 @@ namespace JoeScan.Pinchot
         {
             if (ScanHeads.Count == 0)
             {
-                throw new InvalidOperationException("No scan heads in scan system.");
+                ThrowInvalidOperationException("No scan heads in scan system.");
             }
 
             if (IsConnected)
             {
-                throw new InvalidOperationException("Already connected.");
+                ThrowInvalidOperationException("Already connected.");
             }
 
             if (IsScanning)
             {
-                throw new InvalidOperationException("Already scanning.");
+                ThrowInvalidOperationException("Already scanning.");
             }
 
             foreach (var sh in ScanHeads)
             {
                 if (!discoveries.ContainsKey(sh.SerialNumber))
                 {
-                    throw new InvalidOperationException($"Scan head {sh.SerialNumber} not seen on the network.");
+                    ThrowInvalidOperationException($"Scan head {sh.SerialNumber} not seen on the network.");
                 }
 
                 var discovery = discoveries[sh.SerialNumber];
                 if (!discovery.IsCompatibleWithApi())
                 {
-                    throw new VersionCompatibilityException(discovery.Version);
+                    ThrowVersionCompatibilityException(discovery.Version);
                 }
 
                 // update IP address as it could've changed from the time the scan head object
@@ -422,13 +437,18 @@ namespace JoeScan.Pinchot
                     string badCameras = string.Join(",", sh.Cameras.Except(goodCameras));
                     if (badCameras.Any())
                     {
-                        throw new InvalidOperationException(
+                        ThrowInvalidOperationException(
                             $"Couldn't detect cameras: {badCameras}!\n" +
                             "Something might be broken internally!");
                     }
                 }
 
                 PreSendConfiguration();
+            }
+
+            if (ScanHeads.All(sh => sh.IsVersionCompatible(16, 3, 0)))
+            {
+                StartHeartBeat();
             }
 
             return ScanHeads.Where(sh => !sh.IsConnected).ToList().AsReadOnly();
@@ -446,13 +466,15 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                throw new InvalidOperationException("Attempting to disconnect when not connected.");
+                ThrowInvalidOperationException("Attempting to disconnect when not connected.");
             }
 
             if (IsScanning)
             {
-                throw new InvalidOperationException("Can not disconnect while still scanning.");
+                ThrowInvalidOperationException("Can not disconnect while still scanning.");
             }
+
+            StopHeartBeat();
 
             foreach (var s in ScanHeads)
             {
@@ -547,22 +569,22 @@ namespace JoeScan.Pinchot
         {
             if (options == null)
             {
-                throw new ArgumentNullException(nameof(options));
+                ThrowArgumentNullException(nameof(options));
             }
 
             if (!IsConnected)
             {
-                throw new InvalidOperationException("Attempting to start scanning when not connected.");
+                ThrowInvalidOperationException("Attempting to start scanning when not connected.");
             }
 
             if (IsScanning)
             {
-                throw new InvalidOperationException("Attempting to start scanning while already scanning.");
+                ThrowInvalidOperationException("Attempting to start scanning while already scanning.");
             }
 
             if (NumberOfPhases == 0 || phaseTable.Any(p => p.Elements.Count == 0))
             {
-                throw new InvalidOperationException("Cannot start scanning without a phase table.");
+                ThrowInvalidOperationException("Cannot start scanning without a phase table.");
             }
 
             IdlePeriodUs = options.IdlePeriodUs;
@@ -573,7 +595,7 @@ namespace JoeScan.Pinchot
 
             if (options.PeriodUs < minScanPeriodUs)
             {
-                throw new ArgumentOutOfRangeException(
+                ThrowArgumentOutOfRangeException(
                     "Scan period is smaller than the minimum allowed for the system. " +
                     $"Requested {options.PeriodUs}µs but minimum is {minScanPeriodUs}µs.");
             }
@@ -584,7 +606,7 @@ namespace JoeScan.Pinchot
                 {
                     if (!sh.IsVersionCompatible(16, 2, 0))
                     {
-                        throw new VersionCompatibilityException("Frame scanning is only compatible with scan heads on firmware version 16.2.0 or greater.");
+                        ThrowVersionCompatibilityException("Frame scanning is only compatible with scan heads on firmware version 16.2.0 or greater.");
                     }
                 }
 
@@ -603,7 +625,7 @@ namespace JoeScan.Pinchot
                                                  .Any(g => g.Count() > 1);
                 if (hasDuplicatePhaseElements)
                 {
-                    throw new InvalidOperationException("Duplicate element in phase table.");
+                    ThrowInvalidOperationException("Duplicate element in phase table.");
                 }
 
                 currentSequence = 1;
@@ -615,28 +637,60 @@ namespace JoeScan.Pinchot
             // no encoder, the time will be set to 0 which will cause the scan heads
             // to determine their start time independently.
             const ulong startScanningOffsetNs = 22_000_000;
-            var mapping = GetScanSyncMapping();
+            ulong lastTimestampNs = 0;
 
-            // if there is a main ScanSync, get the most recent timestamp from it
-            if (mapping.Count > 0)
+            // If any heads have firwmare lower than 16.3.0, we need to get the main ScanSync encoder
+            // timestamp the old way. This is due to the ScanSync mapping feature requiring a new TCP
+            // message,which is not available in older firmware.
+            if (ScanHeads.Any(sh => !sh.IsVersionCompatible(16, 3, 0)))
             {
-                uint mainScanSyncSerial = mapping.First().Value;
-                if (scanSyncReceiver.TryGetScanSyncData(mainScanSyncSerial, out var data))
+                // Get the ScanSyncs found on the network
+                var activeScanSyncs = scanSyncReceiver.GetScanSyncs();
+
+                // If no ScanSyncs are found, we are not going to add anything to the offset
+                if (activeScanSyncs.Count != 0)
                 {
-                    ulong lastTimestampNs = data.EncoderTimestampNs;
-                    options.StartScanningTimeNs = lastTimestampNs != 0 ? lastTimestampNs + startScanningOffsetNs : 0;
+                    // If two encoders are present on the network, the lowest
+                    // serial number is considered to be the "main" one
+                    // and the other one is considered to be the "auxiliary"
+                    var mainScanSync = activeScanSyncs.OrderBy(s => s.Key).First();
+                    var scanSyncData = mainScanSync.Value;
+                    lastTimestampNs = scanSyncData.EncoderTimestampNs;
                 }
-                else
+            }
+            else
+            {
+                var mapping = GetScanSyncMapping();
+
+                // if there is a main ScanSync, get the most recent timestamp from it
+                if (mapping.Count > 0)
                 {
-                    throw new InvalidOperationException($"ScanSync {mainScanSyncSerial} is not found on the network.");
+                    uint mainScanSyncSerial = mapping.First().Value;
+                    if (scanSyncReceiver.TryGetScanSyncData(mainScanSyncSerial, out var data))
+                    {
+                        lastTimestampNs = data.EncoderTimestampNs;
+                    }
+                    else
+                    {
+                        ThrowInvalidOperationException($"ScanSync {mainScanSyncSerial} is not found on the network.");
+                    }
                 }
             }
 
+            options.StartScanningTimeNs = lastTimestampNs != 0 ? lastTimestampNs + startScanningOffsetNs : 0;
             Parallel.ForEach(ScanHeads, scanHead => scanHead.StartScanning(options));
 
             keepAliveTokenSource = new CancellationTokenSource();
             keepAliveToken = keepAliveTokenSource.Token;
-            Task.Run(KeepAliveLoop, keepAliveToken);
+
+            // If any scan head is not compatible with the heartbeat mechanism,
+            // start the keep alive loop.
+            // Otherwise, the heartbeat message will be used for client-side
+            // connection monitoring and scan-server keep alive during scanning.
+            if (ScanHeads.Any(sh => !sh.IsVersionCompatible(16, 3, 0)))
+            {
+                Task.Run(KeepAliveLoop, keepAliveToken);
+            }
         }
 
         /// <summary>
@@ -654,11 +708,10 @@ namespace JoeScan.Pinchot
         {
             if (!IsScanning)
             {
-                throw new InvalidOperationException("Attempting to stop scanning when not scanning.");
+                ThrowInvalidOperationException("Attempting to stop scanning when not scanning.");
             }
 
             Parallel.ForEach(ScanHeads, scanHead => scanHead.StopScanning());
-
             keepAliveTokenSource.Cancel();
         }
 
@@ -677,12 +730,12 @@ namespace JoeScan.Pinchot
         {
             if (!IsConnected)
             {
-                throw new InvalidOperationException("Not connected.");
+                ThrowInvalidOperationException("Not connected.");
             }
 
             if (phaseTable.Count == 0 || phaseTable.All(p => p.Elements.Count == 0))
             {
-                throw new InvalidOperationException("Cannot request minimum scan period without creating a phase table.");
+                ThrowInvalidOperationException("Cannot request minimum scan period without creating a phase table.");
             }
 
             // ensure configuration is sent to scan head so the min scan period is accurate
@@ -743,7 +796,7 @@ namespace JoeScan.Pinchot
             // token is canceled rather than gracefully returning
             if (token.IsCancellationRequested)
             {
-                throw new OperationCanceledException(token);
+                ThrowOperationCanceledException(token);
             }
 
             return frame;
@@ -844,17 +897,17 @@ namespace JoeScan.Pinchot
         {
             if (IsConnected)
             {
-                throw new InvalidOperationException("Can not remove scan head while connected.");
+                ThrowInvalidOperationException("Can not remove scan head while connected.");
             }
 
             if (IsScanning)
             {
-                throw new InvalidOperationException("Can not remove scan head while scanning.");
+                ThrowInvalidOperationException("Can not remove scan head while scanning.");
             }
 
             if (!idToScanHead.ContainsKey(scanHead.ID))
             {
-                throw new ArgumentException("Scan head is not managed.");
+                ThrowArgumentException("Scan head is not managed.");
             }
 
             if (idToScanHead.TryRemove(scanHead.ID, out scanHead))
@@ -863,7 +916,7 @@ namespace JoeScan.Pinchot
             }
             else
             {
-                throw new InvalidOperationException("Failed to remove scan head.");
+                ThrowInvalidOperationException("Failed to remove scan head.");
             }
 
             profileBuffers = idToScanHead.Values.Select(sh => sh.Profiles).ToArray();
@@ -877,12 +930,12 @@ namespace JoeScan.Pinchot
         {
             if (IsConnected)
             {
-                throw new InvalidOperationException("Can not remove scan head while connected.");
+                ThrowInvalidOperationException("Can not remove scan head while connected.");
             }
 
             if (IsScanning)
             {
-                throw new InvalidOperationException("Can not remove scan head while scanning.");
+                ThrowInvalidOperationException("Can not remove scan head while scanning.");
             }
 
             foreach (var scanHead in ScanHeads)
@@ -920,10 +973,22 @@ namespace JoeScan.Pinchot
 
                 foreach (var sh in ScanHeads)
                 {
-                    if (sh is Phaser phaser && currentSequence % phaser.FramesPerStrobe != 0)
+                    if (sh is Phaser phaser )
                     {
-                        continue;
+                        bool skipSequence = true;
+                        foreach (var strobe in phaser.StrobeConfigurations)
+                        {
+                            if (currentSequence % strobe.Value.FramesPerStrobe == 0)
+                            {
+                                skipSequence = false;
+                            }
+                        }
+                        if (skipSequence)
+                        {
+                            continue;
+                        }
                     }
+                    
 
                     var stats = sh.QueueManager.GetStats();
                     if (minSeq > stats.MinSeq) { minSeq = stats.MinSeq; }
@@ -933,7 +998,7 @@ namespace JoeScan.Pinchot
                     if (stats.MaxSize == 0 && !sh.IsConnected)
                     {
                         StopSystem();
-                        throw new InvalidOperationException($"Scan head {sh.SerialNumber} is not connected, possible network or power error.");
+                        ThrowInvalidOperationException($"Scan head {sh.SerialNumber} is not connected, possible network or power error.");
                     }
                 }
 
@@ -974,9 +1039,20 @@ namespace JoeScan.Pinchot
                 }
 
                 var props = ni.GetIPProperties();
-                if (NetworkInterface.LoopbackInterfaceIndex == props.GetIPv4Properties()?.Index)
+                try
                 {
-                    continue;
+                    var interfaceProperties = props.GetIPv4Properties();
+                    if (NetworkInterface.LoopbackInterfaceIndex == interfaceProperties.Index)
+                    {
+                        continue;
+                    }
+                }
+                catch (NetworkInformationException)
+                {
+                    // see issue #2399
+                    // the exception is thrown in .NET9 and up, when the interface does not have an IPv4 address.
+                    // we can ignore this and continue to the next interface.
+                   continue;
                 }
 
                 foreach (var addrInfo in props.UnicastAddresses)
@@ -1024,6 +1100,97 @@ namespace JoeScan.Pinchot
             }
         }
 
+        /// <summary>
+        /// Initializes and starts the heartbeat mechanism for all connected <see cref="ScanHead"/>s.
+        /// </summary>
+        /// <remarks>
+        /// The heartbeat feature is only available for scan heads running firmware version 16.3.0 or higher.
+        /// </remarks>
+        private void StartHeartBeat()
+        {
+            if (ScanHeads.All(sh => sh.IsVersionCompatible(16, 3, 0)))
+            {
+                StopHeartBeat();
+                heartBeatTokenSource = new CancellationTokenSource();
+                heartBeatToken = heartBeatTokenSource.Token;
+                Parallel.ForEach(ScanHeads, scanHead =>
+                {
+                    if (scanHead.IsConnected)
+                    {
+                        scanHead.SetHeartBeatTimeout(HeartBeatTimeoutMs);
+                    }
+                });
+
+                Task.Run(HeartBeatLoop, heartBeatToken);
+                heartBeatRunning = true;
+            }
+        }
+
+        /// <summary>
+        /// Stops the heartbeat mechanism for all connected <see cref="ScanHead"/>s.
+        /// </summary>
+        /// <remarks>
+        /// The heartbeat feature is only available for scan heads running firmware version 16.3.0 or higher.
+        /// </remarks>
+        private void StopHeartBeat()
+        {
+            if (!heartBeatRunning)
+            {
+                return;
+            }
+
+            if (ScanHeads.All(sh => sh.IsVersionCompatible(16, 3, 0)))
+            {
+                heartBeatTokenSource?.Cancel();
+                heartBeatTokenSource?.Dispose();
+                Parallel.ForEach(ScanHeads, scanHead => scanHead.SetHeartBeatTimeout(0));
+                heartBeatRunning = false;
+            }
+        }
+
+        /// <summary>
+        /// Periodically sends heartbeat requests to all connected <see cref="ScanHead"/>s to ensure they remain responsive.
+        /// </summary>
+        /// <remarks>
+        /// This method runs in a loop, sending heartbeat requests at regular intervals defined by <see cref="SendIntervalMs"/>.
+        /// The actual timeout is set in <see cref="ScanHead.SetHeartBeatTimeout"/>.
+        /// The loop continues as long as the scan system is connected. If the operation is canceled, the loop exits gracefully.
+        /// If there is an IOException, it's safe to assume IsConnected will be false since the socket will have been closed.
+        /// </remarks>
+        private async Task HeartBeatLoop()
+        {
+            const int sendIntervalMs = 250;
+            try
+            {
+                while (IsConnected)
+                {
+                    // This delay is used to control the frequency of heartbeat requests.
+                    await Task.Delay(sendIntervalMs, heartBeatToken).ConfigureAwait(false);
+
+                    foreach (var scanHead in ScanHeads)
+                    {
+                        try
+                        {
+                            // This call will perform a TCP send, followed by a TCP read
+                            // to check if the scan head is still alive. It is a blocking call,
+                            // hence the previous throttle using sendIntervalMs.
+                            scanHead.GetHeartBeat();
+                        }
+                        catch (IOException)
+                        {
+                            // Individual scan head failure should not cause the entire system to fail.
+                            // If a scan head fails, it will be marked as disconnected and a separate 
+                            // exception will be thrown from that ScanHead instance
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // ignored
+            }
+        }
+
         private void UpdateCameraLaserConfigurations()
         {
             foreach (var sh in ScanHeads)
@@ -1045,7 +1212,7 @@ namespace JoeScan.Pinchot
                     uint maxGroups = scanHead.Specification.MaxConfigurationGroups;
                     if (scanHead.CameraLaserConfigurations.Count >= maxGroups)
                     {
-                        throw new InvalidOperationException($"Scan head {scanHead.ID} cannot have more than {maxGroups} camera laser configurations.");
+                        ThrowInvalidOperationException($"Scan head {scanHead.ID} cannot have more than {maxGroups} camera laser configurations.");
                     }
 
                     var camera = scanHead.CameraPortToId(element.CameraPort);
@@ -1095,6 +1262,47 @@ namespace JoeScan.Pinchot
             dirtyFlags = ScanSystemDirtyStateFlags.Clean;
         }
 
+        private void ThrowArgumentException(string exceptionMessage, string paramName = null)
+        {
+            StopHeartBeat();
+            throw new ArgumentException(exceptionMessage, paramName);
+        }
+
+        private void ThrowArgumentNullException(string exceptionMessage)
+        {
+            StopHeartBeat();
+            throw new ArgumentNullException(exceptionMessage);
+        }
+
+        private void ThrowInvalidOperationException(string exceptionMessage)
+        {
+            StopHeartBeat();
+            throw new InvalidOperationException(exceptionMessage);
+        }
+
+        private void ThrowVersionCompatibilityException(string exceptionMessage)
+        {
+            StopHeartBeat();
+            throw new VersionCompatibilityException(exceptionMessage);
+        }
+
+        private void ThrowVersionCompatibilityException(ScanHeadVersionInformation version)
+        {
+            StopHeartBeat();
+            throw new VersionCompatibilityException(version);
+        }
+
+        private void ThrowArgumentOutOfRangeException(string exceptionMessage, string paramName = null)
+        {
+            StopHeartBeat();
+            throw new ArgumentOutOfRangeException(paramName, exceptionMessage);
+        }
+
+        private void ThrowOperationCanceledException(CancellationToken token)
+        {
+            StopHeartBeat();
+            throw new OperationCanceledException(token);
+        }
         #endregion
     }
 }

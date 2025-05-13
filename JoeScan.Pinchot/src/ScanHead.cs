@@ -533,7 +533,6 @@ namespace JoeScan.Pinchot
             bool success = Profiles.TryTake(out profile, (int)timeout.TotalMilliseconds, token);
             if (!success && !IsConnected)
             {
-                scanSystem.StopSystem();
                 throw new InvalidOperationException($"Scan head {SerialNumber} is not connected, possible network or power issue.");
             }
 
@@ -892,7 +891,8 @@ namespace JoeScan.Pinchot
         /// An <see cref="IProfile"/> from <paramref name="camera"/> and its associated <see cref="Laser"/>.
         /// </returns>
         /// <remarks>
-        /// The auto-exposure mechanism is currently non-functional. The camera exposure
+        /// The auto-exposure mechanism is currently non-functional. The camera exposure will be set
+        /// to <see cref="ScanheadConfiguration.DefaultLaserOnTimeUs"/>
         /// and laser on time will be set to <see cref="ScanHeadConfiguration.DefaultLaserOnTimeUs"/>.
         /// </remarks>
         /// <exception cref="InvalidOperationException">
@@ -1405,6 +1405,7 @@ namespace JoeScan.Pinchot
 
             ClearProfiles();
             QueueManager.Clear();
+
             senderReceiver.StartScanning(opts);
         }
 
@@ -1510,6 +1511,17 @@ namespace JoeScan.Pinchot
             }
 
             senderReceiver.SendScanSyncConfiguration(mapping);
+        }
+
+        internal IEnumerable<DiscoveredScanSync> RequestScanSyncs()
+        {
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException("Not connected.");
+            }
+
+            var data = senderReceiver.RequestScanSyncs();
+            return data.Scansyncs.Select(ss => new DiscoveredScanSync(ss));
         }
 
         internal void Disconnect()
@@ -1812,6 +1824,52 @@ namespace JoeScan.Pinchot
         internal void ClearDirty()
         {
             dirtyState = ScanHeadDirtyStateFlags.Clean;
+        }
+
+        /// <summary>
+        /// Sets the timeout duration for heartbeat messages in milliseconds. Within the senderReceiver,
+        /// the actual properties being set are ReceiveTimeout and SendTimeout on the TCP control client.
+        /// </summary>
+        /// <param name="timeoutMs">The timeout duration in milliseconds. Set to 0 to disable the timeout.</param>
+        /// <remarks>
+        /// The heartbeat mechanism is used to detect connection issues with the scan head.
+        /// If no heartbeat response is received within the specified timeout period, the connection
+        /// is considered lost. This method allows adjusting the sensitivity of this detection.
+        /// This method requires firmware version 16.3.0 or later.
+        /// </remarks>
+        internal void SetHeartBeatTimeout(int timeoutMs)
+        {
+            ThrowIfNotVersionCompatible(16, 3, 0);
+            senderReceiver.SetHeartBeatTCPTimeout(timeoutMs);
+        }
+
+        /// <summary>
+        /// Sends a heartbeat request to the scan head to verify the connection is still active.
+        /// </summary>
+        /// <remarks>
+        /// This method is used to check if the scan head is still responsive. It requires firmware
+        /// version 16.3.0 or later. If the connection is lost, an IOException will be thrown with
+        /// details about the socket error.
+        /// </remarks>
+        /// <exception cref="IOException">
+        /// Thrown when the heartbeat request fails, indicating a loss of connection with the scan head.
+        /// The exception message includes details about the underlying socket error.
+        /// </exception>
+        internal void GetHeartBeat()
+        {
+            try
+            {
+                senderReceiver.RequestHeartBeat();
+            }
+            catch (IOException e)
+            {
+                // Throw as an IOException, use the original message, but include (socket exception: error code)
+                if (e.InnerException?.InnerException is SocketException se)
+                {
+                    throw new IOException(e.Message + $" (socket exception: {se.SocketErrorCode})", e);
+                }
+                throw;
+            }
         }
 
         #endregion

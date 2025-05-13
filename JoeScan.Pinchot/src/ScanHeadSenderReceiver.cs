@@ -47,6 +47,8 @@ namespace JoeScan.Pinchot
         private readonly byte[] DisconnectRequest = new Client::MessageClientT() { Type = Client::MessageType.DISCONNECT }.SerializeToBinary();
         private readonly byte[] KeepAliveRequest = new Client::MessageClientT() { Type = Client::MessageType.KEEP_ALIVE }.SerializeToBinary();
         private readonly byte[] StatusRequest = new Client::MessageClientT() { Type = Client::MessageType.STATUS_REQUEST }.SerializeToBinary();
+        private readonly byte[] ScanSyncStatusRequest = new Client::MessageClientT() { Type = Client::MessageType.SCANSYNC_STATUS_REQUEST }.SerializeToBinary();
+        private readonly byte[] HeartBeatRequest = new Client::MessageClientT() { Type = Client::MessageType.HEART_BEAT_REQUEST }.SerializeToBinary();
 
         #endregion
 
@@ -79,7 +81,6 @@ namespace JoeScan.Pinchot
                 // packets with each TCP transmission and don't want that to be delayed
                 NoDelay = true
             };
-
             tcpDataReceiveMemory = new Memory<byte>(tcpDataReceiveBuffer);
             tcpDataClient = new TcpClient(new IPEndPoint(scanHead.ClientIpAddress, 0))
             {
@@ -200,6 +201,7 @@ namespace JoeScan.Pinchot
         internal void Close()
         {
             IsConnected = false;
+            IsScanning = false;
             try { tokenSource?.Cancel(); } catch { }
             try { tcpControlClient?.Close(); } catch { }
             try { tcpDataClient?.Close(); } catch { }
@@ -251,7 +253,8 @@ namespace JoeScan.Pinchot
             }
 
             profileAssembler = new ProfileAssembler(scanHead, opts.AllFormat);
-            idleSkipCount = scanHead.Configuration.IdleScanPeriodUs / opts.PeriodUs;
+            var idlePeriodUs = opts.IdlePeriodUs ?? scanHead.Configuration.IdleScanPeriodUs;
+            idleSkipCount = idlePeriodUs / opts.PeriodUs;
             mode = opts.Mode;
 
             // TODO: The phaser configuration request must come before
@@ -295,10 +298,40 @@ namespace JoeScan.Pinchot
             TcpSendControl(KeepAliveRequest);
         }
 
+        internal void RequestHeartBeat()
+        {
+            try
+            {
+                TcpSendAndReceiveControl(HeartBeatRequest);
+            }
+            catch (Exception e)
+            {
+                if (IsConnected)
+                {
+                    Close();
+                }
+                throw new IOException($"Scan head {scanHead.SerialNumber} failed to send heartbeat message, possible network or power issue.", e);
+            }
+        }
+
+        /// <summary>
+        /// Set the control timeout in milliseconds.
+        /// </summary>
+        /// <param name="timeoutMs"></param>
+        /// <remarks>
+        /// This is used to set the timeout for the TCP control connection's read and write.
+        /// The default value is 0ms, unless a scan head has firmware v16.3.0 or higher installed.
+        /// With v16.3.0, a heartbeat mechanism was introduced and can vary depending on the current
+        /// state of the scan system and scan head.
+        /// </remarks>
+        internal void SetHeartBeatTCPTimeout(int timeoutMs)
+        {
+            try { tcpControlClient.ReceiveTimeout = timeoutMs; } catch { }
+        }
+
         internal Server::StatusDataT RequestStatus()
         {
-            TcpSendControl(StatusRequest);
-            byte[] buf = TcpReadControl();
+            byte[] buf = TcpSendAndReceiveControl(StatusRequest);
 
             var rsp = Server::MessageServerT.DeserializeFromBinary(buf);
             if (rsp.Type != Server.MessageType.STATUS)
@@ -307,6 +340,19 @@ namespace JoeScan.Pinchot
             }
 
             return rsp.Data.AsStatusData();
+        }
+
+        internal Server::ScanSyncStatusDataT RequestScanSyncs()
+        {
+            byte[] buf = TcpSendAndReceiveControl(ScanSyncStatusRequest);
+
+            var rsp = Server::MessageServerT.DeserializeFromBinary(buf);
+            if (rsp.Type != Server.MessageType.SCANSYNC_STATUS)
+            {
+                throw new InvalidOperationException($"Status request returned unexpected type {rsp.Type}");
+            }
+
+            return rsp.Data.AsScanSyncStatusData();
         }
 
         internal Server::ImageData RequestDiagnosticImage(Client::ImageRequestDataT settings)
@@ -321,8 +367,7 @@ namespace JoeScan.Pinchot
                 }
             }.SerializeToBinary();
 
-            TcpSendControl(req);
-            byte[] buf = TcpReadControl();
+            byte[] buf = TcpSendAndReceiveControl(req);
 
             // Don't use object API in order to save memory since these messages are fairly large
             var bb = new FlatBuffers.ByteBuffer(buf);
@@ -347,8 +392,7 @@ namespace JoeScan.Pinchot
                 }
             }.SerializeToBinary();
 
-            TcpSendControl(req);
-            byte[] buf = TcpReadControl();
+            byte[] buf = TcpSendAndReceiveControl(req);
 
             var rsp = Server::MessageServerT.DeserializeFromBinary(buf);
             if (rsp.Type != Server.MessageType.PROFILE)
@@ -371,8 +415,7 @@ namespace JoeScan.Pinchot
                 }
             }.SerializeToBinary();
 
-            TcpSendControl(req);
-            byte[] buf = TcpReadControl();
+            byte[] buf = TcpSendAndReceiveControl(req);
 
             var rsp = Server::MessageServerT.DeserializeFromBinary(buf);
             if (rsp.Type != Server.MessageType.MAPPLE_DATA)
@@ -441,6 +484,29 @@ namespace JoeScan.Pinchot
             {
                 Close();
                 throw new IOException($"Scan head {scanHead.SerialNumber} failed to read TCP message, possible network or power issue.", e);
+            }
+        }
+
+        internal byte[] TcpSendAndReceiveControl(byte[] packet)
+        {
+            try
+            {
+                lock (tcp_send_lock)
+                {
+                    // Framing packet
+                    TcpControlStream.Write(BitConverter.GetBytes(packet.Length), 0, sizeof(int));
+
+                    // Payload
+                    TcpControlStream.Write(packet, 0, packet.Length);
+
+                    // Read the response
+                    return TcpRead(TcpControlStream);
+                }
+            }
+            catch (Exception e)
+            {
+                Close();
+                throw new IOException($"Scan head {scanHead.SerialNumber} failed to send TCP message, possible network or power issue.", e);
             }
         }
 

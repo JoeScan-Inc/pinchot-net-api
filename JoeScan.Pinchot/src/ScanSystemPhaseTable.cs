@@ -67,6 +67,8 @@ namespace JoeScan.Pinchot
 
         internal int NumberOfPhases => phaseTable.Count;
 
+        internal int NumberOfPhaseElements => phaseTable.Sum(p => p.Elements.Count);
+
         /// <summary>
         /// Clears all phases and elements added to the phase table.
         /// </summary>

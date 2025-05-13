@@ -4,8 +4,10 @@
 // root for license information.
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace JoeScan.Pinchot
 {
@@ -40,18 +42,41 @@ namespace JoeScan.Pinchot
         /// To get more detailed information, such as encoder count and flags, subscribe to <see cref="ScanSyncUpdateEvent"/>.
         /// </summary>
         /// <returns>A list of all discovered ScanSyncs on the network.</returns>
+        /// <remarks>
+        /// This function will only report ScanSyncs that all the <see cref="ScanHead"/>s in the system can see.
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="IsConnected"/> is <see langword="false"/>.
+        /// </exception>
         public List<DiscoveredScanSync> DiscoverScanSyncs()
         {
-            // the ScanSync receiver is constantly listening for ScanSyncs, so no need
-            // to do a "discovery" like the one done for scan heads
-            var scanSyncs = scanSyncReceiver.GetScanSyncs().Values.OrderBy(ss => ss.SerialNumber);
-            return scanSyncs.Select(ss => new DiscoveredScanSync(ss)).ToList();
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException("Cannot discover ScanSyncs while not connected.");
+            }
+
+            // gather all ScanSyncs seen by each head
+            var allScanHeadScanSyncs = new ConcurrentBag<IEnumerable<DiscoveredScanSync>>();
+            Parallel.ForEach(ScanHeads, sh =>
+            {
+                var ss = sh.RequestScanSyncs();
+                allScanHeadScanSyncs.Add(ss);
+            });
+
+            // gets only ScanSyncs seen by every head
+            var scanHeadScanSyncs = allScanHeadScanSyncs.Aggregate((l1, l2) => l1.Intersect(l2, new DiscoveredScanSyncSerialComparer()));
+
+            // gets ScanSyncs serials seen by the API
+            var apiSerials = scanSyncReceiver.GetScanSyncs().Keys;
+
+            // returns only ScanSyncs seen by both the scan heads and the API
+            return scanHeadScanSyncs.Where(ss => apiSerials.Contains(ss.SerialNumber)).ToList();
         }
 
         /// <summary>
         /// Resets any <see cref="Encoder"/> to ScanSync mapping that has been set. Default behavior is to use the ScanSync
         /// with the lowest serial number as the <see cref="Encoder.Main"/> encoder. Further <see cref="Encoder"/> mappings
-        /// are assigned to ScanSyncs in descending order of serial number.
+        /// are assigned to ScanSyncs in ascending order of serial number.
         /// </summary>
         /// <exception cref="VersionCompatibilityException">
         /// This exception will be thrown if any <see cref="ScanHead"/> in the system isn't version 16.3.0 or greater.
@@ -82,6 +107,8 @@ namespace JoeScan.Pinchot
         /// Aux 2 is mapped to an encoder without mapping aux 1.
         /// </exception>
         /// <exception cref="InvalidOperationException">
+        /// <see cref="IsConnected"/> is <see langword="false"/>.<br/>
+        /// -or-<br/>
         /// A ScanSync with the supplied serial isn't found on the network.
         /// </exception>
         /// <exception cref="VersionCompatibilityException">
@@ -94,6 +121,11 @@ namespace JoeScan.Pinchot
             foreach (var sh in ScanHeads)
             {
                 sh.ThrowIfNotVersionCompatible(16, 3, 0);
+            }
+
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException("Cannot set ScanSync mapping while disconnected.");
             }
 
             if (mainSerial == 0 || aux1Serial == 0 || aux2Serial == 0)
@@ -121,19 +153,19 @@ namespace JoeScan.Pinchot
                 throw new ArgumentException("Can't map aux 2 to an encoder without mapping aux 1.");
             }
 
-            var scanSyncs = scanSyncReceiver.GetScanSyncs();
+            var validSerials = DiscoverScanSyncs().Select(ss => ss.SerialNumber);
 
-            if (!scanSyncs.ContainsKey(mainSerial))
+            if (!validSerials.Contains(mainSerial))
             {
                 throw new InvalidOperationException($"ScanSync {mainSerial} is not found on the network.");
             }
 
-            if (aux1Serial.HasValue && !scanSyncs.ContainsKey(aux1Serial.Value))
+            if (aux1Serial.HasValue && !validSerials.Contains(aux1Serial.Value))
             {
                 throw new InvalidOperationException($"ScanSync {aux1Serial} is not found on the network.");
             }
 
-            if (aux2Serial.HasValue && !scanSyncs.ContainsKey(aux2Serial.Value))
+            if (aux2Serial.HasValue && !validSerials.Contains(aux2Serial.Value))
             {
                 throw new InvalidOperationException($"ScanSync {aux2Serial} is not found on the network.");
             }
@@ -156,7 +188,7 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Gets the <see cref="Encoder"/> to ScanSync mapping.
         /// If <see cref="SetScanSyncMapping(uint, uint?, uint?)"/> hasn't been called,
-        /// the default mapping is used. Default behvaior is to use the ScanSync with the
+        /// the default mapping is used. Default behavior is to use the ScanSync with the
         /// lowest serial number as the <see cref="Encoder.Main"/> encoder.
         /// Further <see cref="Encoder"/> mappings are assigned to ScanSyncs in descending
         /// order of serial number.
@@ -171,13 +203,13 @@ namespace JoeScan.Pinchot
             if (mapping.Count == 0)
             {
                 // default behavior is to order by serial number in ascending order
-                var orderedSerials = scanSyncReceiver.GetScanSyncs().Keys.OrderBy(s => s);
+                var orderedSerials = DiscoverScanSyncs().OrderBy(s => s.SerialNumber);
 
                 // only map as many ScanSyncs as there are encoder enum values
                 int count = Math.Min(orderedSerials.Count(), Enum.GetValues(typeof(Encoder)).Length);
                 for (int e = 0; e < count; e++)
                 {
-                    mapping[(Encoder)e] = orderedSerials.ElementAt(e);
+                    mapping[(Encoder)e] = orderedSerials.ElementAt(e).SerialNumber;
                 }
             }
 

@@ -60,17 +60,17 @@ namespace JoeScan.Pinchot
         public EncoderFlags Flags { get; }
 
         /// <summary>
-        /// Timestamp of when signal for aux Y input last went high.
+        /// Timestamp of when signal for aux Y input last transitioned.
         /// </summary>
         public ulong AuxYTimestampNs { get; }
 
         /// <summary>
-        /// Timestamp of when signal for index Z input last went high.
+        /// Timestamp of when signal for index Z input last transitioned.
         /// </summary>
         public ulong IndexZTimestampNs { get; }
 
         /// <summary>
-        /// Timestamp of when signal for sync input last went high.
+        /// Timestamp of when signal for sync input last transitioned.
         /// </summary>
         public ulong SyncTimestampNs { get; }
 
@@ -89,7 +89,7 @@ namespace JoeScan.Pinchot
         // -- Version 4 packet data --
 
         /// <summary>
-        /// Timestamp of when signal for laser disable input last went high.
+        /// Timestamp of when signal for laser disable input last transitioned.
         /// </summary>
         public ulong LaserDisableTimestampNs { get; }
 

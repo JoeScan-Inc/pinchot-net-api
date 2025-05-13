@@ -4,6 +4,7 @@
 // root for license information.
 
 using System.Net;
+using Server = joescan.schema.server;
 
 namespace JoeScan.Pinchot
 {
@@ -29,18 +30,16 @@ namespace JoeScan.Pinchot
         /// <remarks>This is only valid with ScanSync firmware version 2.1.0 or greater.</remarks>
         public IPAddress IpAddress { get; }
 
-        internal DiscoveredScanSync(uint serialNumber, ScanSyncVersionInformation version, IPAddress ipAddress)
+        internal DiscoveredScanSync(Server::ScanSyncStatusT scanSyncStatus)
         {
-            SerialNumber = serialNumber;
-            Version = version;
-            IpAddress = ipAddress;
-        }
-
-        internal DiscoveredScanSync(ScanSyncData data)
-        {
-            SerialNumber = data.SerialNumber;
-            Version = data.Version;
-            IpAddress = data.IpAddress;
+            SerialNumber = scanSyncStatus.Serial;
+            Version = new ScanSyncVersionInformation
+            {
+                Major = scanSyncStatus.FirmwareVersionMajor,
+                Minor = scanSyncStatus.FirmwareVersionMinor,
+                Patch = scanSyncStatus.FirmwareVersionPatch
+            };
+            IpAddress = new IPAddress(scanSyncStatus.IpAddr);
         }
     }
 }
