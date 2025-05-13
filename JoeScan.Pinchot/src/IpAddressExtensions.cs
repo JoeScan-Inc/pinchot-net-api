@@ -5,11 +5,20 @@
 
 using System;
 using System.Net;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace JoeScan.Pinchot
 {
     internal static class IpAddressExtensions
     {
+        internal struct MacIpPair
+        {
+            public string MacAddress;
+            public string IpAddress;
+        }
+
         internal static IPAddress GetBroadcastAddress(this IPAddress address, IPAddress subnetMask)
         {
             byte[] ipAdressBytes = address.GetAddressBytes();
@@ -59,6 +68,36 @@ namespace JoeScan.Pinchot
         internal static bool IsIPv4LinkLocal(this IPAddress address)
         {
             return address.ToString().StartsWith("169.254", StringComparison.Ordinal);
+        }
+
+        internal static string GetMac(this IPAddress ipAddress)
+        {
+            var macIpPairs = GetAllMacAddressesAndIpPairs();
+            int index = macIpPairs.FindIndex(x => x.IpAddress == ipAddress.ToString());
+            return index >= 0 ? macIpPairs[index].MacAddress.ToUpper().Replace("-", ":") : null;
+        }
+
+        private static List<MacIpPair> GetAllMacAddressesAndIpPairs()
+        {
+            var mip = new List<MacIpPair>();
+            var pProcess = new Process();
+            pProcess.StartInfo.FileName = "arp";
+            pProcess.StartInfo.Arguments = "-a ";
+            pProcess.StartInfo.UseShellExecute = false;
+            pProcess.StartInfo.RedirectStandardOutput = true;
+            pProcess.StartInfo.CreateNoWindow = true;
+            pProcess.Start();
+            string cmdOutput = pProcess.StandardOutput.ReadToEnd();
+            const string pattern = @"(?<ip>([0-9]{1,3}\.?){4})\s*(?<mac>([a-f0-9]{2}-?){6})";
+
+            var ms = Regex.Matches(cmdOutput, pattern, RegexOptions.IgnoreCase);
+            for (int index = 0; index < ms.Count; index++)
+            {
+                var m = ms[index];
+                mip.Add(new MacIpPair() { MacAddress = m.Groups["mac"].Value, IpAddress = m.Groups["ip"].Value });
+            }
+
+            return mip;
         }
     }
 }

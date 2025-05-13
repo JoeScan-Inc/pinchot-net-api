@@ -268,6 +268,24 @@ namespace JoeScan.Pinchot
                 CameraCoordinates[i] = new Point2D(x, y, brightness);
             }
 
+            // the writer doesn't write the data format, but we can infer it from the data
+            bool isHalf = rawPointsArray.Where((_, i) => i % 2 != 0).All(p => p.X == 0 && p.Y == 0 && p.Brightness == 0);
+            bool isQuarter = rawPointsArray.Where((_, i) => i % 4 != 0).All(p => p.X == 0 && p.Y == 0 && p.Brightness == 0);
+            bool hasBrightness = rawPointsArray.Any(p => p.Brightness != Globals.ProfileDataInvalidBrightness);
+
+            if (isQuarter)
+            {
+                AllDataFormat = hasBrightness ? AllDataFormat.XYBrightnessQuarter : AllDataFormat.XYQuarter;
+            }
+            else if (isHalf)
+            {
+                AllDataFormat = hasBrightness ? AllDataFormat.XYBrightnessHalf : AllDataFormat.XYHalf;
+            }
+            else
+            {
+                AllDataFormat = hasBrightness ? AllDataFormat.XYBrightnessFull : AllDataFormat.XYFull;
+            }
+
             ValidPointCount = (uint)GetValidXYPoints().Count();
         }
 

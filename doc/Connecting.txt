@@ -1,0 +1,7 @@
+
+/**
+\defgroup Connecting
+\brief Functions for building and connecting to a ScanSystem
+
+These classes and functions allow you to add ScanHeads to a ScanSystem and Connect or Disconnect.
+*/

@@ -11,7 +11,7 @@ namespace JoeScan.Pinchot
     /// Various conditions that can occur at the moment the profile was captured.
     /// </summary>
     [Flags]
-    public enum ProfileFlags
+    public enum ProfileFlags : ulong
     {
         /// <summary>
         /// No flags are present.
@@ -57,5 +57,25 @@ namespace JoeScan.Pinchot
         /// ScanSync sync input is logic high.
         /// </summary>
         EncoderMainSync = EncoderFlags.EncoderMainSync,
+
+        /// <summary>
+        /// ScanSync Aux Y is logic high.
+        /// </summary>
+        EncoderMainAuxY = EncoderFlags.EncoderMainAuxY,
+
+        /// <summary>
+        /// ScanSync sync input connection is faulty.
+        /// </summary>
+        EncoderMainFaultSync = EncoderFlags.EncoderMainFaultSync,
+
+        /// <summary>
+        /// ScanSync laser disable is logic high.
+        /// </summary>
+        EncoderMainLaserDisable = EncoderFlags.EncoderMainLaserDisable,
+
+        /// <summary>
+        /// ScanSync laser disable input connection is faulty.
+        /// </summary>
+        EncoderMainFaultLaserDisable = EncoderFlags.EncoderMainFaultLaserDisable,
     }
 }

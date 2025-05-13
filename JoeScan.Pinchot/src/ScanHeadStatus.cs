@@ -50,6 +50,19 @@ namespace JoeScan.Pinchot
         /// at the time of the last status update.</value>
         public IDictionary<TemperatureSensor, float> Temperatures { get; internal set; }
 
+        /// <summary>
+        /// Gets the current state of the <see cref="ScanHead"/>.
+        /// </summary>
+        /// <value>The current state of the <see cref="ScanHead"/>.</value>
+        public ScanHeadState State { get; internal set; }
+
+        /// <summary>
+        /// The <see cref="ScanHead"/> detected that the ScanSync's laser disable input
+        /// is asserted. This stops all lasers from firing and no <see cref="IProfile"/>s
+        /// will be received until the signal is cleared.
+        /// </summary>
+        public bool LaserDisabled { get; internal set; }
+
         #endregion
 
         #region Internal Properties
@@ -100,6 +113,8 @@ namespace JoeScan.Pinchot
             GlobalTimeNs = data.GlobalTimeNs;
             NumPacketsSent = data.NumPacketsSent;
             ProfilesSentCount = data.NumProfilesSent;
+            State = (ScanHeadState)data.State;
+            LaserDisabled = data.LaserDisabled;
 
             NumValidEncoders = (uint)data.Encoders.Count;
             EncoderValues = new Dictionary<Encoder, long>();

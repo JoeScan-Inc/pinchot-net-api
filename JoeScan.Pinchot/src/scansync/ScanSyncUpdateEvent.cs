@@ -4,6 +4,8 @@
 // root for license information.
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace JoeScan.Pinchot
 {
@@ -15,11 +17,18 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Data from the ScanSync update.
         /// </summary>
+        [Obsolete("Use 'ScanSyncs' property instead to get a list of all ScanSyncs on the network.")]
         public ScanSyncData Data { get; }
 
-        internal ScanSyncUpdateEvent(ScanSyncData data)
+        /// <summary>
+        /// Data from the ScanSync update.
+        /// </summary>
+        public List<ScanSyncData> ScanSyncs { get; }
+
+        internal ScanSyncUpdateEvent(List<ScanSyncData> data)
         {
-            Data = data;
+            Data = data.FirstOrDefault();
+            ScanSyncs = data;
         }
     }
 }

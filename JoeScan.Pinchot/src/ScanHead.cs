@@ -37,8 +37,7 @@ namespace JoeScan.Pinchot
         private bool disposed;
         private ProductType type;
         private ScanHeadOrientation orientation;
-        private DirtyStateFlags dirtyState;
-        private ScanningMode mode;
+        private ScanHeadDirtyStateFlags dirtyState;
 
         #endregion
 
@@ -128,7 +127,7 @@ namespace JoeScan.Pinchot
                     alignment.Value.Orientation = value;
                 }
 
-                FlagDirty(DirtyStateFlags.Window);
+                FlagDirty(ScanHeadDirtyStateFlags.Window);
             }
         }
 
@@ -209,20 +208,6 @@ namespace JoeScan.Pinchot
             = new ScanHeadConfiguration();
 
         /// <summary>
-        /// Gets or sets the <see cref="ScanningMode"/> that the scan head should operate in
-        /// when <see cref="StartScanning(uint, AllDataFormat, ulong)"/> is called.
-        /// </summary>
-        internal ScanningMode Mode
-        {
-            get => mode;
-            set
-            {
-                mode = value;
-                senderReceiver.Mode = value;
-            }
-        }
-
-        /// <summary>
         /// Gets the thread safe collection of profiles received from the scan head.
         /// </summary>
         internal BlockingCollection<IProfile> Profiles { get; }
@@ -278,6 +263,13 @@ namespace JoeScan.Pinchot
             }
         }
 
+        internal bool IsLaserDriven =>
+            Specification.ConfigurationGroupPrimary == Client::ConfigurationGroupPrimary.LASER;
+
+        internal bool IsCameraDriven =>
+            Specification.ConfigurationGroupPrimary == Client::ConfigurationGroupPrimary.CAMERA;
+
+
         #endregion
 
         #region Lifecycle
@@ -315,15 +307,7 @@ namespace JoeScan.Pinchot
                 BrightnessCorrections[pair] = new BrightnessCorrection(this);
             }
 
-            dirtyState = DirtyStateFlags.AllDirty;
-        }
-
-        /// <summary>
-        /// The scan head finalizer.
-        /// </summary>
-        ~ScanHead()
-        {
-            Dispose(false);
+            FlagDirty(ScanHeadDirtyStateFlags.AllDirty);
         }
 
         /// <summary>
@@ -439,7 +423,7 @@ namespace JoeScan.Pinchot
             // we make a copy so that we don't share a single configuration between all heads
             Configuration = configuration.Clone() as ScanHeadConfiguration;
 
-            FlagDirty(DirtyStateFlags.Configuration);
+            FlagDirty(ScanHeadDirtyStateFlags.Configuration);
         }
 
         /// <summary>
@@ -549,7 +533,6 @@ namespace JoeScan.Pinchot
             bool success = Profiles.TryTake(out profile, (int)timeout.TotalMilliseconds, token);
             if (!success && !IsConnected)
             {
-                scanSystem.StopSystem();
                 throw new InvalidOperationException($"Scan head {SerialNumber} is not connected, possible network or power issue.");
             }
 
@@ -648,7 +631,7 @@ namespace JoeScan.Pinchot
                 Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
             }
 
-            FlagDirty(DirtyStateFlags.Window);
+            FlagDirty(ScanHeadDirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -685,7 +668,7 @@ namespace JoeScan.Pinchot
             var pair = GetPair(camera);
             Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
 
-            FlagDirty(DirtyStateFlags.Window);
+            FlagDirty(ScanHeadDirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -724,7 +707,7 @@ namespace JoeScan.Pinchot
             var pair = GetPair(laser);
             Alignments[pair] = new AlignmentParameters(CameraToMillScale, rollDegrees, shiftX, shiftY, Orientation);
 
-            FlagDirty(DirtyStateFlags.Window);
+            FlagDirty(ScanHeadDirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -851,7 +834,7 @@ namespace JoeScan.Pinchot
             var pair = GetPair(camera);
             ExclusionMasks[pair] = mask.Clone() as ExclusionMask;
 
-            FlagDirty(DirtyStateFlags.ExclusionMask);
+            FlagDirty(ScanHeadDirtyStateFlags.ExclusionMask);
         }
 
         /// <summary>
@@ -893,7 +876,7 @@ namespace JoeScan.Pinchot
             var pair = GetPair(laser);
             ExclusionMasks[pair] = mask.Clone() as ExclusionMask;
 
-            FlagDirty(DirtyStateFlags.ExclusionMask);
+            FlagDirty(ScanHeadDirtyStateFlags.ExclusionMask);
         }
 
         /// <summary>
@@ -908,7 +891,8 @@ namespace JoeScan.Pinchot
         /// An <see cref="IProfile"/> from <paramref name="camera"/> and its associated <see cref="Laser"/>.
         /// </returns>
         /// <remarks>
-        /// The auto-exposure mechanism is currently non-functional. The camera exposure
+        /// The auto-exposure mechanism is currently non-functional. The camera exposure will be set
+        /// to <see cref="ScanheadConfiguration.DefaultLaserOnTimeUs"/>
         /// and laser on time will be set to <see cref="ScanHeadConfiguration.DefaultLaserOnTimeUs"/>.
         /// </remarks>
         /// <exception cref="InvalidOperationException">
@@ -1196,6 +1180,9 @@ namespace JoeScan.Pinchot
                     $"and {Specification.MaxLaserOnTimeUs}µs.");
             }
 
+            // ensure the scan head has up to date configuration
+            scanSystem.PreSendConfiguration();
+
             var req = new Client::ImageRequestDataT()
             {
                 CameraPort = CameraIdToPort(camera),
@@ -1388,37 +1375,38 @@ namespace JoeScan.Pinchot
             _ = RequestStatus();
         }
 
-        internal void StartScanning(uint periodUs, AllDataFormat dataFormat, ulong startTimeNs)
+        internal void StartScanning(StartScanningOptions opts)
         {
             if (IsDirty())
             {
                 throw new InvalidOperationException("Scan head configuration was not sent prior to StartScanning");
             }
 
-            if (periodUs < Specification.MinScanPeriodUs)
+            if (opts.PeriodUs < Specification.MinScanPeriodUs)
             {
-                throw new ArgumentOutOfRangeException(nameof(periodUs),
-                    $"Scan period {periodUs}µs is smaller than specification " +
+                throw new ArgumentOutOfRangeException(nameof(opts),
+                    $"Scan period {opts.PeriodUs}µs is smaller than specification " +
                     $"{Specification.MinScanPeriodUs}µs for scan head {ID}");
             }
 
-            if (periodUs > Specification.MaxScanPeriodUs)
+            if (opts.PeriodUs > Specification.MaxScanPeriodUs)
             {
-                throw new ArgumentOutOfRangeException(nameof(periodUs),
-                    $"Scan period {periodUs}µs is bigger than specification " +
+                throw new ArgumentOutOfRangeException(nameof(opts),
+                    $"Scan period {opts.PeriodUs}µs is bigger than specification " +
                     $"{Specification.MaxScanPeriodUs}µs for scan head {ID}");
             }
 
-            if (periodUs < CachedStatus.MinScanPeriodUs)
+            if (opts.PeriodUs < CachedStatus.MinScanPeriodUs)
             {
-                throw new ArgumentOutOfRangeException(nameof(periodUs),
-                    $"Requested scan period {periodUs}µs is smaller than that allowed by the " +
+                throw new ArgumentOutOfRangeException(nameof(opts),
+                    $"Requested scan period {opts.PeriodUs}µs is smaller than that allowed by the " +
                     $"current scan head configuration {CachedStatus.MinScanPeriodUs}µs for scan head {ID}.");
             }
 
             ClearProfiles();
             QueueManager.Clear();
-            senderReceiver.StartScanning(periodUs, dataFormat, startTimeNs);
+
+            senderReceiver.StartScanning(opts);
         }
 
         internal void StopScanning()
@@ -1443,7 +1431,7 @@ namespace JoeScan.Pinchot
 
             Windows[pair] = window.Clone() as ScanWindow;
 
-            FlagDirty(DirtyStateFlags.Window);
+            FlagDirty(ScanHeadDirtyStateFlags.Window);
         }
 
         /// <summary>
@@ -1515,10 +1503,31 @@ namespace JoeScan.Pinchot
             senderReceiver.SendCorrectionStoreData(pair, x, y, roll, notes);
         }
 
+        internal void SendScanSyncMapping(Dictionary<Encoder, uint> mapping)
+        {
+            if (!IsVersionCompatible(16, 3, 0))
+            {
+                return;
+            }
+
+            senderReceiver.SendScanSyncConfiguration(mapping);
+        }
+
+        internal IEnumerable<DiscoveredScanSync> RequestScanSyncs()
+        {
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException("Not connected.");
+            }
+
+            var data = senderReceiver.RequestScanSyncs();
+            return data.Scansyncs.Select(ss => new DiscoveredScanSync(ss));
+        }
+
         internal void Disconnect()
         {
-            dirtyState = DirtyStateFlags.AllDirty;
             senderReceiver.Disconnect();
+            FlagDirty(ScanHeadDirtyStateFlags.AllDirty);
         }
 
         /// <summary>
@@ -1568,6 +1577,9 @@ namespace JoeScan.Pinchot
             {
                 throw new InvalidOperationException("Scan system is scanning.");
             }
+
+            // ensure the scan head has up to date configuration
+            scanSystem.PreSendConfiguration();
 
             var requestData = new Client::ProfileRequestDataT
             {
@@ -1751,13 +1763,14 @@ namespace JoeScan.Pinchot
 
         internal bool IsDirty()
         {
-            return dirtyState != DirtyStateFlags.Clean;
+            return dirtyState != ScanHeadDirtyStateFlags.Clean;
         }
 
-        internal bool IsDirty(DirtyStateFlags flag)
+        internal bool IsDirty(ScanHeadDirtyStateFlags flag)
         {
             return dirtyState.HasFlag(flag);
         }
+
         #endregion
 
         #region Private Methods
@@ -1795,19 +1808,65 @@ namespace JoeScan.Pinchot
             return Schema.ProductSpecification.GetSpecification(binName);
         }
 
-        internal void FlagDirty(DirtyStateFlags dirtyFlag)
+        internal void FlagDirty(ScanHeadDirtyStateFlags flag)
         {
-            if (dirtyFlag.Equals(DirtyStateFlags.Clean))
+            if (flag.Equals(ScanHeadDirtyStateFlags.Clean))
             {
                 return;
             }
 
-            dirtyState |= dirtyFlag;
+            dirtyState |= flag;
         }
 
         internal void ClearDirty()
         {
-            dirtyState = DirtyStateFlags.Clean;
+            dirtyState = ScanHeadDirtyStateFlags.Clean;
+        }
+
+        /// <summary>
+        /// Sets the timeout duration for heartbeat messages in milliseconds. Within the senderReceiver,
+        /// the actual properties being set are ReceiveTimeout and SendTimeout on the TCP control client.
+        /// </summary>
+        /// <param name="timeoutMs">The timeout duration in milliseconds. Set to 0 to disable the timeout.</param>
+        /// <remarks>
+        /// The heartbeat mechanism is used to detect connection issues with the scan head.
+        /// If no heartbeat response is received within the specified timeout period, the connection
+        /// is considered lost. This method allows adjusting the sensitivity of this detection.
+        /// This method requires firmware version 16.3.0 or later.
+        /// </remarks>
+        internal void SetHeartBeatTimeout(int timeoutMs)
+        {
+            ThrowIfNotVersionCompatible(16, 3, 0);
+            senderReceiver.SetHeartBeatTCPTimeout(timeoutMs);
+        }
+
+        /// <summary>
+        /// Sends a heartbeat request to the scan head to verify the connection is still active.
+        /// </summary>
+        /// <remarks>
+        /// This method is used to check if the scan head is still responsive. It requires firmware
+        /// version 16.3.0 or later. If the connection is lost, an IOException will be thrown with
+        /// details about the socket error.
+        /// </remarks>
+        /// <exception cref="IOException">
+        /// Thrown when the heartbeat request fails, indicating a loss of connection with the scan head.
+        /// The exception message includes details about the underlying socket error.
+        /// </exception>
+        internal void GetHeartBeat()
+        {
+            try
+            {
+                senderReceiver.RequestHeartBeat();
+            }
+            catch (IOException e)
+            {
+                // Throw as an IOException, use the original message, but include (socket exception: error code)
+                if (e.InnerException?.InnerException is SocketException se)
+                {
+                    throw new IOException(e.Message + $" (socket exception: {se.SocketErrorCode})", e);
+                }
+                throw;
+            }
         }
 
         #endregion

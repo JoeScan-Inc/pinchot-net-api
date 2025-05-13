@@ -1,0 +1,7 @@
+
+/**
+\defgroup Scanning
+\brief Functions to Scan and collect data
+
+These are classes and functions that deal with scanning and collecting profiles from the ScanSystem.
+ */

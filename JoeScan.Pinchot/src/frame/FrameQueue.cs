@@ -14,6 +14,7 @@ namespace JoeScan.Pinchot
 
         internal int Count => profiles.Count;
         internal uint LastSequence { get; private set; }
+        internal uint FirstSequence => profiles.FirstOrDefault()?.SequenceNumber ?? LastSequence;
         internal bool QueueOverflowed { get; private set; }
 
         internal FrameQueue(int bufferSize)

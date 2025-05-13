@@ -65,17 +65,17 @@ namespace JoeScan.Pinchot
     {
         private readonly List<Phase> phaseTable = new List<Phase>();
 
-        private bool phaseTableIsDirty = true;
-
         internal int NumberOfPhases => phaseTable.Count;
+
+        internal int NumberOfPhaseElements => phaseTable.Sum(p => p.Elements.Count);
 
         /// <summary>
         /// Clears all phases and elements added to the phase table.
         /// </summary>
         public void ClearPhaseTable()
         {
-            phaseTableIsDirty = true;
             phaseTable.Clear();
+            FlagDirty(ScanSystemDirtyStateFlags.PhaseTable);
         }
 
         /// <summary>
@@ -85,8 +85,8 @@ namespace JoeScan.Pinchot
         /// </summary>
         public void AddPhase()
         {
-            phaseTableIsDirty = true;
             phaseTable.Add(new Phase());
+            FlagDirty(ScanSystemDirtyStateFlags.PhaseTable);
         }
 
         /// <summary>
@@ -244,7 +244,7 @@ namespace JoeScan.Pinchot
 
             var phase = phaseTable.Last();
             phase.AddElement(scanHead, pair, configuration);
-            phaseTableIsDirty = true;
+            FlagDirty(ScanSystemDirtyStateFlags.PhaseTable);
         }
 
         /// <summary>

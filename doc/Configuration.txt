@@ -1,0 +1,7 @@
+
+/**
+\defgroup Configuration
+\brief Configuring Phasing, Windows, Alignment, LaserOnTime, etc
+
+These classes and functions allow you to read and set the ScanSystem and ScanHead configuration.
+*/

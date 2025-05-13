@@ -23,21 +23,21 @@ namespace JoeScan.Pinchot
         #region Public Properties
 
         /// <summary>
-        /// Gets the major version component of the of the scan head firmware version.
+        /// Gets the major version component of the scan head firmware version.
         /// </summary>
-        /// <value>The major version component of the of the scan head firmware version.</value>
+        /// <value>The major version component of the scan head firmware version.</value>
         public uint Major { get; internal set; }
 
         /// <summary>
-        /// Gets the minor version component of the of the scan head firmware version.
+        /// Gets the minor version component of the scan head firmware version.
         /// </summary>
-        /// <value>The minor version component of the of the scan head firmware version.</value>
+        /// <value>The minor version component of the scan head firmware version.</value>
         public uint Minor { get; internal set; }
 
         /// <summary>
-        /// Gets the patch version component of the of the scan head firmware version.
+        /// Gets the patch version component of the scan head firmware version.
         /// </summary>
-        /// <value>The patch version component of the of the scan head firmware version.</value>
+        /// <value>The patch version component of the scan head firmware version.</value>
         public uint Patch { get; internal set; }
 
         /// <summary>
@@ -47,9 +47,9 @@ namespace JoeScan.Pinchot
         public ProductType Type { get; internal set; }
 
         /// <summary>
-        /// Gets the scan head firmware version.
+        /// Gets the scan head firmware version in 'Major.Minor.Patch' format.
         /// </summary>
-        /// <returns>The scan head firmware version.</returns>
+        /// <returns>The scan head firmware version in 'Major.Minor.Patch' format.</returns>
         public override string ToString()
         {
             return $"{Major}.{Minor}.{Patch}";

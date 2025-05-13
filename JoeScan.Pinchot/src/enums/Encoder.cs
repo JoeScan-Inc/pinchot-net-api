@@ -3,6 +3,8 @@
 // Licensed under the BSD 3 Clause License. See LICENSE.txt in the project
 // root for license information.
 
+using joescan.schema.server;
+
 namespace JoeScan.Pinchot
 {
     /// <summary>
@@ -13,16 +15,16 @@ namespace JoeScan.Pinchot
         /// <summary>
         /// Main encoder.
         /// </summary>
-        Main = 0,
+        Main = EncoderRole.MAIN,
 
         /// <summary>
         /// Auxiliary encoder.
         /// </summary>
-        Auxiliary1,
+        Auxiliary1 = EncoderRole.AUX_1,
 
         /// <summary>
         /// Second auxiliary encoder.
         /// </summary>
-        Auxiliary2
+        Auxiliary2 = EncoderRole.AUX_2
     }
 }

@@ -5,11 +5,9 @@
 
 namespace JoeScan.Pinchot
 {
-    internal class FrameQueueStats
+    internal class ActiveScanSync
     {
-        internal uint MinSeq;
-        internal uint MaxSeq;
-        internal int MinSize;
-        internal int MaxSize;
+        public ScanSyncData ScanSync { get; set; }
+        public int LastUpdateTick { get; set; }
     }
 }

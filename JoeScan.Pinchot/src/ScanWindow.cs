@@ -22,11 +22,52 @@ namespace JoeScan.Pinchot
     /// </remarks>
     public sealed class ScanWindow : ICloneable
     {
-        internal IList<ScanWindowConstraint> WindowConstraints = new List<ScanWindowConstraint>();
+        /// <summary>
+        /// Gets the type of scan window.
+        /// </summary>
+        /// <value>The type of scan window.</value>
+        public ScanWindowType Type { get; internal set; }
 
-        private ScanWindow()
+        /// <summary>
+        /// Gets the vertices of the scan window in clockwise order.
+        /// </summary>
+        /// <value>The vertices of the scan window.</value>
+        /// <seealso cref="CreateScanWindowPolygonal(ICollection{Point2D})"/>
+        /// <seealso cref="CreateScanWindowRectangular(double, double, double, double)"/>
+        /// <seealso cref="CreateScanWindowUnconstrained"/>
+        public IEnumerable<Point2D> Vertices { get; internal set; } = new List<Point2D>();
+
+        /// <summary>
+        /// Gets the constraints of the scan window in clockwise order.
+        /// </summary>
+        /// <value>The constraints of the scan window.</value>
+        /// <seealso cref="CreateScanWindowPolygonal(ICollection{Point2D})"/>
+        /// <seealso cref="CreateScanWindowRectangular(double, double, double, double)"/>
+        /// <seealso cref="CreateScanWindowUnconstrained"/>
+        public IEnumerable<Tuple<Point2D, Point2D>> Constraints
         {
+            get
+            {
+                if (!Vertices.Any())
+                {
+                    yield break;
+                }
+
+                var last = Vertices.First();
+                foreach (var point in Vertices.Skip(1))
+                {
+                    yield return Tuple.Create(last, point);
+                    last = point;
+                }
+
+                // connect the first and last points
+                var first = Vertices.First();
+                yield return Tuple.Create(last, first);
+            }
         }
+
+        // The constructor is marked as internal so that users must use the factory functions
+        internal ScanWindow() { }
 
         /// <summary>
         /// Creates a rectangular scan window, in mill coordinates, within which a camera will look for the laser.
@@ -80,12 +121,17 @@ namespace JoeScan.Pinchot
                 throw new ArgumentException($"{nameof(windowRight)} must be greater than {nameof(windowLeft)}");
             }
 
-            var scanWindow = new ScanWindow();
-            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(windowLeft, windowTop, windowRight, windowTop));
-            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(windowRight, windowBottom, windowLeft, windowBottom));
-            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(windowRight, windowTop, windowRight, windowBottom));
-            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(windowLeft, windowBottom, windowLeft, windowTop));
-            return scanWindow;
+            return new ScanWindow
+            {
+                Type = ScanWindowType.Rectangular,
+                Vertices = new List<Point2D>
+                {
+                    new Point2D(windowLeft, windowTop),
+                    new Point2D(windowRight, windowTop),
+                    new Point2D(windowRight, windowBottom),
+                    new Point2D(windowLeft, windowBottom)
+                }
+            };
         }
 
         /// <summary>
@@ -95,7 +141,10 @@ namespace JoeScan.Pinchot
         /// <seealso cref="ScanHead.SetWindow(ScanWindow)"/>
         public static ScanWindow CreateScanWindowUnconstrained()
         {
-            return new ScanWindow();
+            return new ScanWindow
+            {
+                Type = ScanWindowType.Unconstrained
+            };
         }
 
         /// <summary>
@@ -176,19 +225,11 @@ namespace JoeScan.Pinchot
                 throw new ArgumentException("Polygon isn't convex.");
             }
 
-            var scanWindow = new ScanWindow();
-            var previousPoint = points.First();
-            foreach (var point in points.Skip(1))
+            return new ScanWindow
             {
-                scanWindow.WindowConstraints.Add(new ScanWindowConstraint(previousPoint.X, previousPoint.Y, point.X, point.Y));
-                previousPoint = point;
-            }
-
-            // connect the first and last points
-            var firstPoint = points.First();
-            scanWindow.WindowConstraints.Add(new ScanWindowConstraint(previousPoint.X, previousPoint.Y, firstPoint.X, firstPoint.Y));
-
-            return scanWindow;
+                Type = ScanWindowType.Polygonal,
+                Vertices = new List<Point2D>(points)
+            };
         }
 
         /// <summary>
@@ -199,7 +240,7 @@ namespace JoeScan.Pinchot
         public object Clone()
         {
             var window = MemberwiseClone() as ScanWindow;
-            window.WindowConstraints = new List<ScanWindowConstraint>(WindowConstraints);
+            window.Vertices = new List<Point2D>(Vertices);
             return window;
         }
     }

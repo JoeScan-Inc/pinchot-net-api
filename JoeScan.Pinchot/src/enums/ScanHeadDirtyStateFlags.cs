@@ -12,7 +12,7 @@ namespace JoeScan.Pinchot
     /// </summary>
     /// <seealso cref="ScanSystem.PreSendConfiguration"/>
     [Flags]
-    internal enum DirtyStateFlags
+    internal enum ScanHeadDirtyStateFlags
     {
         Clean = 0,
         Window = 1 << 1,

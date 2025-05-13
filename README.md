@@ -26,6 +26,7 @@ Studio 2022 with the .NET 6 Runtime (".NET desktop development" workload in
 Visual Studio Installer) is needed.
 
 ## Links
+* [Documentation](https://api.joescan.com/doc/v16/net/JoeScan.Pinchot.html)
 * [Developer Portal](http://api.joescan.com)
 * [Latest Release](http://api.joescan.com/release)
 * [GitHub Source](https://github.com/JoeScan-Inc/pinchot-net-api)
