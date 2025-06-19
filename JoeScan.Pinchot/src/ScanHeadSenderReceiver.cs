@@ -247,12 +247,9 @@ namespace JoeScan.Pinchot
         {
             ProfileBufferOverflowed = false;
 
-            if (scanHead is Phaser)
-            {
-                opts.Format = DataFormat.XYBrightnessQuarter;
-            }
+            AllDataFormat format = scanHead is Phaser ? AllDataFormat.XYBrightnessQuarter : opts.AllFormat;
+            profileAssembler = new ProfileAssembler(scanHead, format);
 
-            profileAssembler = new ProfileAssembler(scanHead, opts.AllFormat);
             var idlePeriodUs = opts.IdlePeriodUs ?? scanHead.Configuration.IdleScanPeriodUs;
             idleSkipCount = idlePeriodUs / opts.PeriodUs;
             mode = opts.Mode;
