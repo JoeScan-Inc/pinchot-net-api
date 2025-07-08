@@ -345,6 +345,7 @@ namespace JoeScan.Pinchot
 
                     if (IsDirty(ScanSystemDirtyStateFlags.ScanSyncMapping))
                     {
+                        // TODO: Bug? What if user sets mapping then tries to reset to default?
                         // only send if user has set a mapping (main encoder must be set)
                         if (encoderToScanSyncMapping.TryGetValue(Encoder.Main, out _))
                         {
@@ -352,7 +353,10 @@ namespace JoeScan.Pinchot
                         }
                     }
 
-                    sh.RequestStatus();
+                    // TODO: These will be combined with extend status message
+                    _ = sh.RequestStatus(); // update cached status
+                    _ = sh.RequestScanSyncs(); // update cached ScanSyncs
+
                     sh.ClearDirty();
                 });
 
@@ -438,9 +442,13 @@ namespace JoeScan.Pinchot
                 PreSendConfiguration();
             }
 
-            if (ScanHeads.All(sh => sh.IsVersionCompatible(16, 3, 0)))
+            // TODO: Revisit heartbeat, we needed to get 16.3.1 out quickly
+            if (false)
             {
-                StartHeartBeat();
+                if (ScanHeads.All(sh => sh.IsVersionCompatible(16, 3, 0)))
+                {
+                    StartHeartBeat();
+                }
             }
 
             return ScanHeads.Where(sh => !sh.IsConnected).ToList().AsReadOnly();
@@ -629,60 +637,27 @@ namespace JoeScan.Pinchot
             // no encoder, the time will be set to 0 which will cause the scan heads
             // to determine their start time independently.
             const ulong startScanningOffsetNs = 22_000_000;
-            ulong lastTimestampNs = 0;
-
-            // If any heads have firwmare lower than 16.3.0, we need to get the main ScanSync encoder
-            // timestamp the old way. This is due to the ScanSync mapping feature requiring a new TCP
-            // message,which is not available in older firmware.
-            if (ScanHeads.Any(sh => !sh.IsVersionCompatible(16, 3, 0)))
-            {
-                // Get the ScanSyncs found on the network
-                var activeScanSyncs = scanSyncReceiver.GetScanSyncs();
-
-                // If no ScanSyncs are found, we are not going to add anything to the offset
-                if (activeScanSyncs.Count != 0)
-                {
-                    // If two encoders are present on the network, the lowest
-                    // serial number is considered to be the "main" one
-                    // and the other one is considered to be the "auxiliary"
-                    var mainScanSync = activeScanSyncs.OrderBy(s => s.Key).First();
-                    var scanSyncData = mainScanSync.Value;
-                    lastTimestampNs = scanSyncData.EncoderTimestampNs;
-                }
-            }
-            else
-            {
-                var mapping = GetScanSyncMapping();
-
-                // if there is a main ScanSync, get the most recent timestamp from it
-                if (mapping.Count > 0)
-                {
-                    uint mainScanSyncSerial = mapping.First().Value;
-                    if (scanSyncReceiver.TryGetScanSyncData(mainScanSyncSerial, out var data))
-                    {
-                        lastTimestampNs = data.EncoderTimestampNs;
-                    }
-                    else
-                    {
-                        ThrowInvalidOperationException($"ScanSync {mainScanSyncSerial} is not found on the network.");
-                    }
-                }
-            }
-
+            ulong lastTimestampNs = GetMainTimestamp();
             options.StartScanningTimeNs = lastTimestampNs != 0 ? lastTimestampNs + startScanningOffsetNs : 0;
             Parallel.ForEach(ScanHeads, scanHead => scanHead.StartScanning(options));
 
             keepAliveTokenSource = new CancellationTokenSource();
             keepAliveToken = keepAliveTokenSource.Token;
 
-            // If any scan head is not compatible with the heartbeat mechanism,
-            // start the keep alive loop.
-            // Otherwise, the heartbeat message will be used for client-side
-            // connection monitoring and scan-server keep alive during scanning.
-            if (ScanHeads.Any(sh => !sh.IsVersionCompatible(16, 3, 0)))
+            // TODO: Revisit heartbeat, we needed to get 16.3.1 out quickly
+            if (false)
             {
-                Task.Run(KeepAliveLoop, keepAliveToken);
+                // If any scan head is not compatible with the heartbeat mechanism,
+                // start the keep alive loop.
+                // Otherwise, the heartbeat message will be used for client-side
+                // connection monitoring and scan-server keep alive during scanning.
+                if (ScanHeads.Any(sh => !sh.IsVersionCompatible(16, 3, 0)))
+                {
+                    Task.Run(KeepAliveLoop, keepAliveToken);
+                }
             }
+
+            Task.Run(KeepAliveLoop, keepAliveToken);
         }
 
         /// <summary>
@@ -1029,7 +1004,7 @@ namespace JoeScan.Pinchot
                     // see issue #2399
                     // the exception is thrown in .NET9 and up, when the interface does not have an IPv4 address.
                     // we can ignore this and continue to the next interface.
-                   continue;
+                    continue;
                 }
 
                 foreach (var addrInfo in props.UnicastAddresses)
