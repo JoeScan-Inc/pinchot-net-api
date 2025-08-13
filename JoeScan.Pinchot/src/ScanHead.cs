@@ -199,6 +199,12 @@ namespace JoeScan.Pinchot
         internal ScanHeadStatus CachedStatus { get; private set; }
 
         /// <summary>
+        /// The most recent <see cref="DiscoveredScanSync"/>s received from a call to <see cref="RequestScanSyncs"/>.
+        /// </summary>
+        /// <value>The most recent <see cref="DiscoveredScanSync"/>s received from the scan head.</value>
+        internal IEnumerable<DiscoveredScanSync> CachedScanSyncs { get; private set; }
+
+        /// <summary>
         /// Gets the <see cref="ScanHeadConfiguration"/> used to configure the scan head. Use
         /// <see cref="Configure"/> to set.
         /// </summary>
@@ -1334,8 +1340,7 @@ namespace JoeScan.Pinchot
                 updaterTcpClient.Connect(ip, Globals.ScanServerUpdatePort);
                 var updaterStream = updaterTcpClient.GetStream();
                 byte[] rebootRequest = new UpdateClient::MessageClientT { Type = UpdateClient::MessageType.REBOOT_REQUEST }.SerializeToBinary();
-                ScanHeadSenderReceiver.TcpSend(rebootRequest, updaterStream);
-                byte[] rebootBuf = ScanHeadSenderReceiver.TcpRead(updaterStream);
+                byte[] rebootBuf = updaterStream.SendAndReceiveFramedPacket(rebootRequest);
                 var rebootRsp = UpdateServer::MessageServerT.DeserializeFromBinary(rebootBuf);
                 var rebootStatus = rebootRsp.Data.AsStatusData();
 
@@ -1515,13 +1520,14 @@ namespace JoeScan.Pinchot
 
         internal IEnumerable<DiscoveredScanSync> RequestScanSyncs()
         {
-            if (!IsConnected)
+            if (!IsVersionCompatible(16, 3, 0))
             {
-                throw new InvalidOperationException("Not connected.");
+                return Enumerable.Empty<DiscoveredScanSync>();
             }
 
             var data = senderReceiver.RequestScanSyncs();
-            return data.Scansyncs.Select(ss => new DiscoveredScanSync(ss));
+            CachedScanSyncs = data.Scansyncs.Select(ss => new DiscoveredScanSync(ss));
+            return CachedScanSyncs;
         }
 
         internal void Disconnect()

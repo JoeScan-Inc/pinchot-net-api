@@ -4,7 +4,6 @@
 // root for license information.
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -48,6 +47,9 @@ namespace JoeScan.Pinchot
         /// <exception cref="InvalidOperationException">
         /// <see cref="IsConnected"/> is <see langword="false"/>.
         /// </exception>
+        /// <exception cref="VersionCompatibilityException">
+        /// This exception will be thrown if any <see cref="ScanHead"/> in the system isn't version 16.3.0 or greater.
+        /// </exception>
         public List<DiscoveredScanSync> DiscoverScanSyncs()
         {
             if (!IsConnected)
@@ -55,22 +57,15 @@ namespace JoeScan.Pinchot
                 throw new InvalidOperationException("Cannot discover ScanSyncs while not connected.");
             }
 
-            // gather all ScanSyncs seen by each head
-            var allScanHeadScanSyncs = new ConcurrentBag<IEnumerable<DiscoveredScanSync>>();
-            Parallel.ForEach(ScanHeads, sh =>
+            foreach (var sh in ScanHeads)
             {
-                var ss = sh.RequestScanSyncs();
-                allScanHeadScanSyncs.Add(ss);
-            });
+                sh.ThrowIfNotVersionCompatible(16, 3, 0);
+            }
 
-            // gets only ScanSyncs seen by every head
-            var scanHeadScanSyncs = allScanHeadScanSyncs.Aggregate((l1, l2) => l1.Intersect(l2, new DiscoveredScanSyncSerialComparer()));
+            // updates scan heads' cache of ScanSyncs
+            Parallel.ForEach(ScanHeads, sh => _ = sh.RequestScanSyncs());
 
-            // gets ScanSyncs serials seen by the API
-            var apiSerials = scanSyncReceiver.GetScanSyncs().Keys;
-
-            // returns only ScanSyncs seen by both the scan heads and the API
-            return scanHeadScanSyncs.Where(ss => apiSerials.Contains(ss.SerialNumber)).ToList();
+            return GetValidScanSyncs();
         }
 
         /// <summary>
@@ -81,9 +76,17 @@ namespace JoeScan.Pinchot
         /// <exception cref="VersionCompatibilityException">
         /// This exception will be thrown if any <see cref="ScanHead"/> in the system isn't version 16.3.0 or greater.
         /// </exception>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="IsConnected"/> is <see langword="false"/>.
+        /// </exception>
         /// <seealso cref="SetScanSyncMapping(uint, uint?, uint?)"/>
         public void SetDefaultScanSyncMapping()
         {
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException("Cannot set ScanSync mapping while disconnected.");
+            }
+
             foreach (var sh in ScanHeads)
             {
                 sh.ThrowIfNotVersionCompatible(16, 3, 0);
@@ -118,14 +121,14 @@ namespace JoeScan.Pinchot
         /// <seealso cref="GetScanSyncMapping"/>
         public void SetScanSyncMapping(uint mainSerial, uint? aux1Serial = null, uint? aux2Serial = null)
         {
-            foreach (var sh in ScanHeads)
-            {
-                sh.ThrowIfNotVersionCompatible(16, 3, 0);
-            }
-
             if (!IsConnected)
             {
                 throw new InvalidOperationException("Cannot set ScanSync mapping while disconnected.");
+            }
+
+            foreach (var sh in ScanHeads)
+            {
+                sh.ThrowIfNotVersionCompatible(16, 3, 0);
             }
 
             if (mainSerial == 0 || aux1Serial == 0 || aux2Serial == 0)
@@ -190,30 +193,133 @@ namespace JoeScan.Pinchot
         /// If <see cref="SetScanSyncMapping(uint, uint?, uint?)"/> hasn't been called,
         /// the default mapping is used. Default behavior is to use the ScanSync with the
         /// lowest serial number as the <see cref="Encoder.Main"/> encoder.
-        /// Further <see cref="Encoder"/> mappings are assigned to ScanSyncs in descending
+        /// Further <see cref="Encoder"/> mappings are assigned to ScanSyncs in ascending
         /// order of serial number.
         /// </summary>
         /// <returns>A dictionary representing the <see cref="Encoder"/> to ScanSync serial mapping.</returns>
+        /// <exception cref="InvalidOperationException">
+        /// <see cref="IsConnected"/> is <see langword="false"/>.
+        /// </exception>
+        /// <exception cref="VersionCompatibilityException">
+        /// This exception will be thrown if any <see cref="ScanHead"/> in the system isn't version 16.3.0 or greater.
+        /// </exception>
         public Dictionary<Encoder, uint> GetScanSyncMapping()
         {
-            var mapping = encoderToScanSyncMapping.ToDictionary(map => map.Key,
-                                                                map => map.Value);
-
-            // user hasn't set mapping, use default behavior
-            if (mapping.Count == 0)
+            foreach (var sh in ScanHeads)
             {
-                // default behavior is to order by serial number in ascending order
-                var orderedSerials = DiscoverScanSyncs().OrderBy(s => s.SerialNumber);
+                sh.ThrowIfNotVersionCompatible(16, 3, 0);
+            }
 
-                // only map as many ScanSyncs as there are encoder enum values
-                int count = Math.Min(orderedSerials.Count(), Enum.GetValues(typeof(Encoder)).Length);
-                for (int e = 0; e < count; e++)
-                {
-                    mapping[(Encoder)e] = orderedSerials.ElementAt(e).SerialNumber;
-                }
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException("Cannot get ScanSync mapping while disconnected.");
+            }
+
+            // if user set a mapping, return it
+            if (encoderToScanSyncMapping.Count > 0)
+            {
+                // make copy to avoid modifying the original
+                return encoderToScanSyncMapping.ToDictionary(map => map.Key,
+                                                             map => map.Value);
+            }
+
+            var validScanSyncs = GetValidScanSyncs();
+
+            // only map as many ScanSyncs as there are encoder enum values
+            int count = Math.Min(validScanSyncs.Count, Enum.GetValues(typeof(Encoder)).Length);
+            var mapping = new Dictionary<Encoder, uint>(count);
+            for (int e = 0; e < count; e++)
+            {
+                mapping[(Encoder)e] = validScanSyncs[e].SerialNumber;
             }
 
             return mapping;
+        }
+
+        #endregion
+
+        #region Internal Methods
+
+        /// <summary>
+        /// Gets a list of ScanSyncs that are valid for the current system.
+        /// This means that the ScanSyncs are seen by all <see cref="ScanHead"/>s
+        /// in the system and that they are also seen by the API.
+        /// </summary>
+        /// <returns>A list of valid ScanSyncs in ascending order by serial.</returns>
+        internal List<DiscoveredScanSync> GetValidScanSyncs()
+        {
+            // get all ScanSyncs seen by each scan head
+            // filter out `null` from scan heads without ScanSyncs or that just haven't been queried yet
+            var allScanHeadScanSyncs = ScanHeads.Select(sh => sh.CachedScanSyncs).Where(css => css != null);
+
+            // if no ScanSyncs are seen, don't bother with the rest
+            if (!allScanHeadScanSyncs.Any())
+            {
+                return new List<DiscoveredScanSync>();
+            }
+
+            // get only ScanSyncs seen by every head
+            var scanHeadScanSyncs = allScanHeadScanSyncs.Aggregate((l1, l2) => l1.Intersect(l2, new DiscoveredScanSyncSerialComparer()));
+
+            // returns only ScanSyncs seen by both the scan heads and the API
+            var apiSerials = scanSyncReceiver.GetScanSyncs().Keys;
+            var validScanSyncs = scanHeadScanSyncs.Where(ss => apiSerials.Contains(ss.SerialNumber));
+
+            // order by serial number in ascending order to ensure that the
+            // Main ScanSync is the first one if a mapping hasn't been set
+            return validScanSyncs.OrderBy(s => s.SerialNumber).ToList();
+        }
+
+        /// <summary>
+        /// Gets the most recent timestamp from the <see cref="Encoder.Main"/> ScanSync.
+        /// This takes into account the firmware version of the scan heads where pre-16.3.0
+        /// firmware uses whatever the API can find on the network, while post-16.3.0 uses
+        /// the ScanSync discovery cache.
+        /// </summary>
+        /// <returns>
+        /// The most recent timestamp from the <see cref="Encoder.Main"/> ScanSync or 0
+        /// if the scan head should determine its own start time.
+        /// </returns>
+        internal ulong GetMainTimestamp()
+        {
+            ulong lastTimestampNs = 0;
+
+            // If any heads have firwmare lower than 16.3.0, we need to get the main ScanSync encoder
+            // timestamp the old way. This is due to the ScanSync mapping feature requiring a new TCP
+            // message, which is not available in older firmware.
+            if (ScanHeads.Any(sh => !sh.IsVersionCompatible(16, 3, 0)))
+            {
+                // Get the ScanSyncs found on the network
+                var activeScanSyncs = scanSyncReceiver.GetScanSyncs();
+
+                // If ScanSyncs are found, use the Main ScanSync to get the latest timestamp
+                if (activeScanSyncs.Count != 0)
+                {
+                    // Use the lowest serial number as Main if multiple ScanSyncs are found
+                    var mainScanSync = activeScanSyncs.OrderBy(s => s.Key).First();
+                    var scanSyncData = mainScanSync.Value;
+                    lastTimestampNs = scanSyncData.EncoderTimestampNs;
+                }
+            }
+            else
+            {
+                var mapping = GetScanSyncMapping();
+
+                // if there is a Main ScanSync, get the most recent timestamp from it
+                if (mapping.TryGetValue(Encoder.Main, out uint mainSerial))
+                {
+                    if (scanSyncReceiver.TryGetScanSyncData(mainSerial, out var data))
+                    {
+                        lastTimestampNs = data.EncoderTimestampNs;
+                    }
+                    else
+                    {
+                        ThrowInvalidOperationException($"ScanSync {mainSerial} is not found on the network.");
+                    }
+                }
+            }
+
+            return lastTimestampNs;
         }
 
         #endregion

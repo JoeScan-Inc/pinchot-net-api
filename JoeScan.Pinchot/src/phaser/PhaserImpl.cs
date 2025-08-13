@@ -197,7 +197,7 @@ namespace JoeScan.Pinchot
         internal void SendPhaserConfiguration()
         {
             byte[] phaserConfReq = CreatePhaserConfigurationRequest();
-            TcpSend(phaserConfReq, TcpControlStream);
+            TcpSendControl(phaserConfReq);
         }
 
         private byte[] CreatePhaserConfigurationRequest()

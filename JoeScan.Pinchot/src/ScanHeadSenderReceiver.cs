@@ -41,7 +41,7 @@ namespace JoeScan.Pinchot
         private ScanningMode mode;
 
         private bool disposed;
-        private static readonly object tcp_send_lock = new object();
+        private readonly object tcpLock = new object();
 
         private readonly byte[] StopScanningRequest = new Client::MessageClientT() { Type = Client::MessageType.SCAN_STOP }.SerializeToBinary();
         private readonly byte[] DisconnectRequest = new Client::MessageClientT() { Type = Client::MessageType.DISCONNECT }.SerializeToBinary();
@@ -239,8 +239,8 @@ namespace JoeScan.Pinchot
 
         internal void SendScanSyncConfiguration(Dictionary<Encoder, uint> mapping)
         {
-            byte[] mappingReq = CreateScanSyncConfiguartionRequest(mapping);
-            TcpSend(mappingReq, TcpControlStream);
+            byte[] mappingReq = CreateScanSyncConfigurationRequest(mapping);
+            TcpSendControl(mappingReq);
         }
 
         internal void StartScanning(StartScanningOptions opts)
@@ -434,7 +434,10 @@ namespace JoeScan.Pinchot
         {
             try
             {
-                TcpSend(packet, TcpControlStream);
+                lock (tcpLock)
+                {
+                    TcpControlStream.SendFramedPacket(packet);
+                }
             }
             catch (Exception e)
             {
@@ -444,60 +447,20 @@ namespace JoeScan.Pinchot
         }
 
         /// <summary>
-        /// Send a TCP message to the <paramref name="stream"/> with <paramref name="packet"/> as the payload.
+        /// Sends and receives a TCP message on the <see cref="TcpControlStream"/> with <paramref name="packet"/> as the payload.
         /// </summary>
         /// <param name="packet">The data to send.</param>
-        /// <param name="stream">The stream to send the data to.</param>
+        /// <returns>The response as a byte array.</returns>
         /// <exception cref="IOException">
         /// Thrown when the TCP message fails to send.
         /// </exception>
-        internal static void TcpSend(byte[] packet, NetworkStream stream)
-        {
-            // we need to lock to ensure that the framing packet and the
-            // payload are sent together because multiple threads could
-            // be sending commands at the same time (keep alive, async ops, etc)
-            lock (tcp_send_lock)
-            {
-                // Framing packet
-                stream.Write(BitConverter.GetBytes(packet.Length), 0, sizeof(int));
-                // Payload
-                stream.Write(packet, 0, packet.Length);
-            }
-        }
-
-        /// <summary>
-        /// Receives a TCP message from the <see cref="TcpControlStream"/>.
-        /// </summary>
-        /// <exception cref="IOException">
-        /// Thrown when remote host terminates connection.
-        /// </exception>
-        internal byte[] TcpReadControl()
-        {
-            try
-            {
-                return TcpRead(TcpControlStream);
-            }
-            catch (Exception e)
-            {
-                Close();
-                throw new IOException($"Scan head {scanHead.SerialNumber} failed to read TCP message, possible network or power issue.", e);
-            }
-        }
-
         internal byte[] TcpSendAndReceiveControl(byte[] packet)
         {
             try
             {
-                lock (tcp_send_lock)
+                lock (tcpLock)
                 {
-                    // Framing packet
-                    TcpControlStream.Write(BitConverter.GetBytes(packet.Length), 0, sizeof(int));
-
-                    // Payload
-                    TcpControlStream.Write(packet, 0, packet.Length);
-
-                    // Read the response
-                    return TcpRead(TcpControlStream);
+                    return TcpControlStream.SendAndReceiveFramedPacket(packet);
                 }
             }
             catch (Exception e)
@@ -505,52 +468,6 @@ namespace JoeScan.Pinchot
                 Close();
                 throw new IOException($"Scan head {scanHead.SerialNumber} failed to send TCP message, possible network or power issue.", e);
             }
-        }
-
-        /// <summary>
-        /// Receives a TCP message from the <paramref name="stream"/>.
-        /// </summary>
-        /// <exception cref="IOException">
-        /// Thrown when remote host terminates connection.
-        /// </exception>
-        internal static byte[] TcpRead(NetworkStream stream)
-        {
-            // The server first sends a 4-byte message representing the size of the payload in bytes
-            // followed by the payload itself in another message. This is needed because TCP packets
-            // can be fragmented and a single read isn't guarenteed to get the whole payload.
-            const int frameSize = sizeof(int);
-            byte[] frameBuf = new byte[frameSize];
-
-            // Get the payload size
-            int curr = 0;
-            while (curr < frameSize)
-            {
-                int r = stream.Read(frameBuf, curr, frameSize - curr);
-                if (r == 0)
-                {
-                    throw new IOException("Remote host terminated connection.");
-                }
-
-                curr += r;
-            }
-
-            int dataSize = BitConverter.ToInt32(frameBuf, 0);
-            byte[] buf = new byte[dataSize];
-
-            // Get the payload
-            curr = 0;
-            while (curr < dataSize)
-            {
-                int r = stream.Read(buf, curr, dataSize - curr);
-                if (r == 0)
-                {
-                    throw new IOException("Remote host terminated connection.");
-                }
-
-                curr += r;
-            }
-
-            return buf;
         }
 
         /// <summary>
@@ -558,53 +475,23 @@ namespace JoeScan.Pinchot
         /// </summary>
         internal static async Task TcpSendAsync(byte[] packet, NetworkStream stream)
         {
-            // Framing packet
-            await stream.WriteAsync(BitConverter.GetBytes(packet.Length), 0, sizeof(int));
-            // Payload
-            await stream.WriteAsync(packet, 0, packet.Length);
+            await stream.SendFramedPacketAsync(packet).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Asynchronously sends and receives a TCP message from the <paramref name="stream"/> with <paramref name="packet"/> as the payload.
+        /// </summary>
+        internal static async Task<byte[]> TcpSendAndReceiveAsync(byte[] packet, NetworkStream stream)
+        {
+            return await stream.SendAndReceiveFramedPacketAsync(packet).ConfigureAwait(false);
         }
 
         /// <summary>
         /// Asynchronously receives a TCP message from the <paramref name="stream"/>.
         /// </summary>
-        internal static async Task<byte[]> TcpReadAsync(NetworkStream stream)
+        internal static async Task<byte[]> TcpReceiveAsync(NetworkStream stream)
         {
-            // The server first sends a 4-byte message representing the size of the payload in bytes
-            // followed by the payload itself in another message. This is needed because TCP packets
-            // can be fragmented and a single read isn't guarenteed to get the whole payload.
-            const int frameSize = sizeof(int);
-            byte[] frameBuf = new byte[frameSize];
-
-            // Get the payload size
-            int curr = 0;
-            while (curr < frameSize)
-            {
-                int r = await stream.ReadAsync(frameBuf, curr, frameSize - curr);
-                if (r == 0)
-                {
-                    throw new Exception("Remote host terminated connection.");
-                }
-
-                curr += r;
-            }
-
-            int dataSize = BitConverter.ToInt32(frameBuf, 0);
-            byte[] buf = new byte[dataSize];
-
-            // Get the payload
-            curr = 0;
-            while (curr < dataSize)
-            {
-                int r = await stream.ReadAsync(buf, curr, dataSize - curr);
-                if (r == 0)
-                {
-                    throw new Exception("Remote host terminated connection.");
-                }
-
-                curr += r;
-            }
-
-            return buf;
+            return await stream.ReceiveFramedPacketAsync().ConfigureAwait(false);
         }
 
         #endregion
@@ -976,7 +863,7 @@ namespace JoeScan.Pinchot
             return message.SerializeToBinary();
         }
 
-        private static byte[] CreateScanSyncConfiguartionRequest(Dictionary<Encoder, uint> mapping)
+        private static byte[] CreateScanSyncConfigurationRequest(Dictionary<Encoder, uint> mapping)
         {
             uint mainSerial = mapping.TryGetValue(Encoder.Main, out uint m) ? m : 0;
             uint aux1Serial = mapping.TryGetValue(Encoder.Auxiliary1, out uint a1) ? a1 : 0;
